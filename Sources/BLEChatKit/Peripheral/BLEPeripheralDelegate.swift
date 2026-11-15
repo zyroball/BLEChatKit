@@ -26,4 +26,5 @@ public protocol BLEPeripheralDelegate: AnyObject
     func peripheralDidReceiveMessage(_ message: String,from centralID: UUID)
     func peripheralDidSubscribe(centralID: UUID)
     func peripheralDidUnsubscribe(centralID: UUID)
+    func peripheralDidFailToSend(to centralID: UUID, error: Error)
 }

@@ -415,7 +415,6 @@ extension BLECentral: CBCentralManagerDelegate
 
 extension BLECentral: CBPeripheralDelegate
 {
-    
     public func peripheral(_ peripheral: CBPeripheral,
                            didWriteValueFor characteristic: CBCharacteristic,
                            error: Error?)
@@ -427,7 +426,8 @@ extension BLECentral: CBPeripheralDelegate
         }
 
         let deviceID = peripheral.identifier
-        
+
+        // 切断処理中、または送信中でなければ無視
         guard !disconnectingDevices.contains(deviceID),
               writingDevices.contains(deviceID)
         else {
@@ -437,16 +437,26 @@ extension BLECentral: CBPeripheralDelegate
         // 書き込み応答を受信したのでタイマー解除
         cancelWriteTimeout(for: deviceID)
 
-        if let error = error {
+        // 書き込み失敗
+        if let error = error
+        {
 
             let retryCount = retryCounts[deviceID] ?? 0
 
+            // 最大再送回数に達した場合
             guard retryCount < maxRetryCount
             else
             {
 
                 print("BLE send failed:", deviceID, error)
 
+                // ★ 追加：アプリ側へ送信失敗を通知
+                delegate?.centralDidFailToSend(
+                    to: deviceID,
+                    error: error
+                )
+
+                // 送信状態をクリア
                 packetQueues.removeValue(forKey: deviceID)
                 writingDevices.remove(deviceID)
                 retryCounts.removeValue(forKey: deviceID)
@@ -454,6 +464,7 @@ extension BLECentral: CBPeripheralDelegate
                 return
             }
 
+            // 再送回数を更新
             retryCounts[deviceID] = retryCount + 1
 
             print(
@@ -463,11 +474,10 @@ extension BLECentral: CBPeripheralDelegate
                 maxRetryCount
             )
 
-            // ★ ここに実装する
+            // 同じパケットを再送
             if let data = packetQueues[deviceID]?.first
             {
 
-                // 再送時もタイムアウト監視
                 startWriteTimeout(for: deviceID)
 
                 peripheral.writeValue(
@@ -495,6 +505,7 @@ extension BLECentral: CBPeripheralDelegate
         // 次のパケットへ
         sendNextPacket(to: deviceID)
     }
+
 
     public func peripheral(_ peripheral: CBPeripheral,
                            didDiscoverServices error: Error?)

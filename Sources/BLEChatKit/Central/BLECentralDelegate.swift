@@ -14,6 +14,7 @@ public protocol BLECentralDelegate: AnyObject
     func centralDidDiscover(_ device: BLEDevice)
     func centralDidReceiveMessage(_ message: String, from deviceID: UUID)
     func centralDidBecomeReady(deviceID: UUID)
+    func centralDidFailToSend(to deviceID: UUID, error: Error)
 }
 
 public enum BLECentralState: Equatable

@@ -102,6 +102,12 @@ extension BLEChatManager: BLECentralDelegate {
         }
     }
     
+    public func centralDidFailToSend(to deviceID: UUID,
+                                     error: Error)
+    {
+        // 必要な場合だけ実装する
+    }
+    
     public func centralDidDiscover(
         _ device: BLEDevice
     ) {
@@ -166,6 +172,11 @@ extension BLEChatManager: BLEPeripheralDelegate {
         }
     }
     
+    public func peripheralDidFailToSend(to centralID: UUID,
+                                 error: Error)
+    {
+           // 必要な場合だけ実装する
+    }
     
     public func peripheralDidSubscribe(
         centralID: UUID

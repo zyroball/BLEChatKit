@@ -17,7 +17,11 @@ public final class BLEPeripheral: NSObject
     private var peripheralManager: CBPeripheralManager!
     private var messageCharacteristic: CBMutableCharacteristic?
     private var subscribedCentrals: [UUID: CBCentral] = [:]
-
+    private var notificationTimeoutTasks: [UUID: DispatchWorkItem] = [:]
+    private let notificationTimeout: TimeInterval = 30
+    
+    // 1デバイスあたりの送信待ちデータ上限：2MB
+    private let maxNotificationQueueBytes = 2_097_152
 
     private var serviceReady = false
     private var advertisingRequested = false
@@ -161,7 +165,28 @@ public final class BLEPeripheral: NSObject
             throw BLETransportError.messageTooLarge
         }
 
-        notificationQueues[centralID, default: []].append(contentsOf: encodedPackets)
+        // 現在の送信待ちデータサイズ
+        let currentSize = notificationQueueSize(for: centralID)
+
+        // 今回追加するパケットの合計サイズ
+        let additionalSize = encodedPackets.reduce(0)
+        {
+            $0 + $1.count
+        }
+
+        // 送信キューの上限を確認
+        guard additionalSize <= maxNotificationQueueBytes,
+              currentSize <= maxNotificationQueueBytes - additionalSize
+        else
+        {
+            throw BLETransportError.messageTooLarge
+        }
+
+        // 上限以内ならキューに追加
+        notificationQueues[centralID, default: []].append(
+            contentsOf: encodedPackets
+        )
+
 
         sendNextNotification(to: centralID,
                              characteristic: characteristic)
@@ -196,9 +221,16 @@ public final class BLEPeripheral: NSObject
         }
 
         notificationQueues[centralID] = queue.isEmpty ? nil : queue
-    }
 
-    
+        if queue.isEmpty
+        {
+            cancelNotificationTimeout(for: centralID)
+        }
+        else if notificationTimeoutTasks[centralID] == nil
+        {
+            startNotificationTimeout(for: centralID)
+        }
+    }
     
     private func handleReceivedPacket(_ data: Data,
                                       from central: CBCentral)
@@ -234,6 +266,61 @@ public final class BLEPeripheral: NSObject
             print("BLE packet decode failed: \(error)")
         }
     }
+    
+    private func notificationQueueSize(for centralID: UUID) -> Int
+    {
+        notificationQueues[centralID]?.reduce(0) { $0 + $1.count } ?? 0
+    }
+    
+    private func cancelNotificationTimeout(for centralID: UUID)
+    {
+        notificationTimeoutTasks[centralID]?.cancel()
+        notificationTimeoutTasks.removeValue(forKey: centralID)
+    }
+    
+    
+    private func startNotificationTimeout(for centralID: UUID)
+    {
+        cancelNotificationTimeout(for: centralID)
+
+        let task = DispatchWorkItem { [weak self] in
+
+            guard let self else { return }
+
+            // 未送信パケットが残っているか確認
+            guard self.notificationQueues[centralID]?.isEmpty == false
+            else
+            {
+                self.cancelNotificationTimeout(for: centralID)
+                return
+            }
+
+            print("BLE notification timeout:", centralID)
+
+            // ★ ここに追加！
+            // アプリ側に送信失敗を通知
+            self.delegate?.peripheralDidFailToSend(
+                to: centralID,
+                error: BLESendError.notificationTimeout
+            )
+
+            // 送信待ちキューを破棄
+            self.notificationQueues.removeValue(
+                forKey: centralID
+            )
+
+            // タイムアウト監視を解除
+            self.cancelNotificationTimeout(for: centralID)
+        }
+
+        notificationTimeoutTasks[centralID] = task
+
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + notificationTimeout,
+            execute: task
+        )
+    }
+
 }
 
 // MARK: - CBPeripheralManagerDelegate
@@ -284,20 +371,25 @@ extension BLEPeripheral: CBPeripheralManagerDelegate
     }
 
     
+    
     public func peripheralManagerIsReady(toUpdateSubscribers peripheral: CBPeripheralManager)
     {
+        guard let characteristic = messageCharacteristic
+        else
+        {
+            return
+        }
+
+        // 未送信パケットが残っているCentralへ送信再開
         for centralID in Array(notificationQueues.keys)
         {
-            guard let characteristic = messageCharacteristic
-            else
-            {
-                return
-            }
-
-            sendNextNotification(to: centralID,
-                                 characteristic: characteristic)
+            sendNextNotification(
+                to: centralID,
+                characteristic: characteristic
+            )
         }
     }
+
 
     public func peripheralManager(_ peripheral: CBPeripheralManager,
                                   didReceiveWrite requests: [CBATTRequest])
@@ -434,6 +526,8 @@ extension BLEPeripheral: CBPeripheralManagerDelegate
 
         // 未送信パケットを破棄
         notificationQueues.removeValue(forKey: deviceID)
+        
+        cancelNotificationTimeout(for: deviceID)
 
         // このデバイスの受信途中データを破棄
         messageAssembler.reset(for: deviceID)
