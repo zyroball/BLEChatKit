@@ -34,8 +34,9 @@ final class BLEChatKitTests: XCTestCase
     }
     
     
-    func testMessageAssembly()
-    {
+    
+    func testMessageAssembly() {
+
         let message = "Hello BLEChatKit! 分割通信テスト"
 
         let originalData = Data(message.utf8)
@@ -44,6 +45,8 @@ final class BLEChatKitTests: XCTestCase
                                              chunkSize: 5)
 
         let messageID = UUID()
+        let deviceID = UUID()
+
         let assembler = BLEMessageAssembler()
 
         var restoredData: Data?
@@ -56,17 +59,21 @@ final class BLEChatKitTests: XCTestCase
                                           totalChunks: chunks.count,
                                           payload: chunk)
 
-            restoredData = assembler.append(packet)
+            // ★ 新しいappend()に対応
+            restoredData = assembler.append(packet,
+                                            from: deviceID)
         }
 
         XCTAssertEqual(restoredData, originalData)
 
         print(
             "復元結果:",
-            String(data: restoredData ?? Data(), encoding: .utf8) ?? "失敗"
+            String(
+                data: restoredData ?? Data(),
+                encoding: .utf8
+            ) ?? "失敗"
         )
     }
-    
     
     func testPacketEncoding() throws
     {
@@ -97,6 +104,31 @@ final class BLEChatKitTests: XCTestCase
 
         print("Packet encode/decode 成功")
     }
+    
+    
+    func testMessageSizeLimit()
+    {
+        let assembler = BLEMessageAssembler()
+        let deviceID = UUID()
+        let messageID = UUID()
+
+        // 1MBを超えるデータ
+        let largeData = Data(repeating: 0x41,
+                             count: 1_048_577)
+
+        let packet = BLEMessagePacket(messageID: messageID,
+                                      chunkIndex: 0,
+                                      totalChunks: 1,
+                                      payload: largeData)
+
+        let result = assembler.append(packet,
+                                      from: deviceID)
+
+        XCTAssertNil(result)
+
+        print("Message size limit test passed")
+    }
+
 
 
 }

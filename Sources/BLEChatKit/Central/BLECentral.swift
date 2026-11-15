@@ -11,14 +11,23 @@ import CoreBluetooth
 
 public final class BLECentral: NSObject
 {
+    private let messageAssembler = BLEMessageAssembler()
     public weak var delegate: BLECentralDelegate?
     private var centralManager: CBCentralManager!
     private var discoveredPeripherals:[UUID: CBPeripheral] = [:]
+    // 切断処理中のデバイス
+    private var disconnectingDevices: Set<UUID> = []
     public let connection = BLEConnection()
     private var messageCharacteristics:[UUID: CBCharacteristic] = [:]
     
+    private var retryCounts: [UUID: Int] = [:]
+    private let maxRetryCount = 3
+    
     private var packetQueues: [UUID: [Data]] = [:]
     private var writingDevices: Set<UUID> = []
+    
+    private var writeTimeoutTasks: [UUID: DispatchWorkItem] = [:]
+    private let writeTimeout: TimeInterval = 10
 
     public override init()
     {
@@ -135,14 +144,24 @@ public final class BLECentral: NSObject
                 for: .withResponse
             )
 
-        // 仮のチャンクサイズ。
         // エンコード後のパケットサイズも考慮する。
-        let chunkSize = max(1, maximumLength / 2)
+        let chunkSize = min(maximumLength - BLEMessagePacket.headerSize,
+                            Int(UInt16.max))
 
-        let packets = try BLEMessagePacketBuilder.build(
-            message: message,
-            chunkSize: chunkSize
-        )
+        guard chunkSize > 0
+        else
+        {
+            throw BLETransportError.messageTooLarge
+        }
+
+        guard chunkSize > 0
+        else
+        {
+            throw BLETransportError.messageTooLarge
+        }
+
+        let packets = try BLEMessagePacketBuilder.build(message: message,
+                                                        chunkSize: chunkSize)
 
         // 実際に送信可能なサイズか検証
         for packet in packets
@@ -187,10 +206,28 @@ public final class BLECentral: NSObject
     }
     
     
+    private func cleanupConnection(for deviceID: UUID)
+    {
+        // 送信待ちパケットを破棄
+        packetQueues.removeValue(forKey: deviceID)
+
+        // 書き込み中の状態を解除
+        writingDevices.remove(deviceID)
+        
+        messageAssembler.reset(for: deviceID)
+        
+        retryCounts.removeValue(forKey: deviceID)
+        
+        cancelWriteTimeout(for: deviceID)
+
+        print("BLE connection cleaned:", deviceID)
+    }
+    
+    
     private func sendNextPacket(to deviceID: UUID)
     {
-
         guard !writingDevices.contains(deviceID),
+              !disconnectingDevices.contains(deviceID),
               let peripheral = discoveredPeripherals[deviceID],
               peripheral.state == .connected,
               let characteristic = messageCharacteristics[deviceID],
@@ -201,11 +238,66 @@ public final class BLECentral: NSObject
 
         writingDevices.insert(deviceID)
 
+        // ★ タイムアウト監視開始
+        startWriteTimeout(for: deviceID)
+
         peripheral.writeValue(packet,
                               for: characteristic,
-                              type: .withResponse
-        )
+                              type: .withResponse)
     }
+
+    
+    private func cancelWriteTimeout(for deviceID: UUID)
+    {
+        writeTimeoutTasks[deviceID]?.cancel()
+        writeTimeoutTasks.removeValue(forKey: deviceID)
+    }
+    
+    
+    
+    private func startWriteTimeout(for deviceID: UUID)
+    {
+
+        cancelWriteTimeout(for: deviceID)
+
+        let task = DispatchWorkItem
+        {
+            [weak self] in
+
+            guard let self else { return }
+
+            guard self.writingDevices.contains(deviceID),
+                  !self.disconnectingDevices.contains(deviceID)
+            else {
+                return
+            }
+
+            print("BLE write timeout:", deviceID)
+
+            // 切断処理中にする
+            self.disconnectingDevices.insert(deviceID)
+
+            // 送受信状態をクリア
+            self.cleanupConnection(for: deviceID)
+
+            // BLE接続を切断
+            if let peripheral = self.discoveredPeripherals[deviceID],
+               peripheral.state != .disconnected
+            {
+
+                self.centralManager.cancelPeripheralConnection(
+                    peripheral
+                )
+            }
+        }
+
+        writeTimeoutTasks[deviceID] = task
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + writeTimeout,
+                                      execute: task)
+    }
+
+
 }
 
 // MARK: - CBCentralManagerDelegate
@@ -253,21 +345,34 @@ extension BLECentral: CBCentralManagerDelegate
         delegate?.centralDidDiscover(device)
     }
 
-    public func centralManager(
-        _ central: CBCentralManager,
-        didConnect peripheral: CBPeripheral
-    ) {
+    public func centralManager(_ central: CBCentralManager,
+                               didConnect peripheral: CBPeripheral)
+    {
+        let deviceID = peripheral.identifier
+
+        // 再接続時に古い送受信状態をクリア
+        cleanupConnection(for: deviceID)
+
+        // 切断処理中の状態を解除
+        disconnectingDevices.remove(deviceID)
+
+        // PeripheralのDelegateを設定
         peripheral.delegate = self
 
+        // 接続状態を更新
         connection.updateState(
             for: peripheral,
             to: .connected
         )
 
+        // サービス探索を開始
         peripheral.discoverServices([
             BLEUUID.service
         ])
+
+        print("BLE connected:", deviceID)
     }
+
 
     public func centralManager(_ central: CBCentralManager,
                                didFailToConnect peripheral: CBPeripheral,
@@ -278,24 +383,32 @@ extension BLECentral: CBCentralManagerDelegate
     }
 
     
+
     public func centralManager(_ central: CBCentralManager,
                                didDisconnectPeripheral peripheral: CBPeripheral,
                                error: Error?)
     {
-        messageCharacteristics.removeValue(
-            forKey: peripheral.identifier
-        )
+        let deviceID = peripheral.identifier
+        
+        disconnectingDevices.remove(peripheral.identifier)
 
+        // メッセージCharacteristicを削除
+        messageCharacteristics.removeValue(forKey: deviceID)
+
+        // ★ 追加：送信キューをクリーンアップ
+        cleanupConnection(for: deviceID)
+
+        // 接続状態を更新
         connection.updateState(for: peripheral,
                                to: .disconnected)
 
+        // エラーがある場合は通知
         if let error
         {
-            connection.delegate?.connectionDidFail(deviceID: peripheral.identifier,
+            connection.delegate?.connectionDidFail(deviceID: deviceID,
                                                    error: error)
         }
     }
-
 }
 
 
@@ -305,46 +418,84 @@ extension BLECentral: CBPeripheralDelegate
     
     public func peripheral(_ peripheral: CBPeripheral,
                            didWriteValueFor characteristic: CBCharacteristic,
-        error: Error?)
+                           error: Error?)
     {
+        guard characteristic.uuid == BLEUUID.message
+        else
+        {
+            return
+        }
 
         let deviceID = peripheral.identifier
-
-        guard writingDevices.contains(deviceID)
-        else
-        {
+        
+        guard !disconnectingDevices.contains(deviceID),
+              writingDevices.contains(deviceID)
+        else {
             return
         }
 
+        // 書き込み応答を受信したのでタイマー解除
+        cancelWriteTimeout(for: deviceID)
+
+        if let error = error {
+
+            let retryCount = retryCounts[deviceID] ?? 0
+
+            guard retryCount < maxRetryCount
+            else
+            {
+
+                print("BLE send failed:", deviceID, error)
+
+                packetQueues.removeValue(forKey: deviceID)
+                writingDevices.remove(deviceID)
+                retryCounts.removeValue(forKey: deviceID)
+
+                return
+            }
+
+            retryCounts[deviceID] = retryCount + 1
+
+            print(
+                "BLE retry:",
+                retryCount + 1,
+                "/",
+                maxRetryCount
+            )
+
+            // ★ ここに実装する
+            if let data = packetQueues[deviceID]?.first
+            {
+
+                // 再送時もタイムアウト監視
+                startWriteTimeout(for: deviceID)
+
+                peripheral.writeValue(
+                    data,
+                    for: characteristic,
+                    type: .withResponse
+                )
+            }
+
+            return
+        }
+
+        // 書き込み成功
+        retryCounts.removeValue(forKey: deviceID)
+
+        // 送信済みパケットを削除
+        if packetQueues[deviceID]?.isEmpty == false
+        {
+            packetQueues[deviceID]?.removeFirst()
+        }
+
+        // 送信状態を解除
         writingDevices.remove(deviceID)
 
-        if let error = error
-        {
-            print("BLE write failed:", error)
-
-            packetQueues.removeValue(forKey: deviceID)
-            return
-        }
-
-        guard packetQueues[deviceID]?.isEmpty == false
-        else
-        {
-            return
-        }
-
-        packetQueues[deviceID]?.removeFirst()
-
-        if packetQueues[deviceID]?.isEmpty == true
-        {
-            packetQueues.removeValue(forKey: deviceID)
-            print("BLE chunked write completed")
-            return
-        }
-
+        // 次のパケットへ
         sendNextPacket(to: deviceID)
     }
 
-    
     public func peripheral(_ peripheral: CBPeripheral,
                            didDiscoverServices error: Error?)
     {
@@ -401,6 +552,7 @@ extension BLECentral: CBPeripheralDelegate
     }
     
     
+    
     public func peripheral(_ peripheral: CBPeripheral,
                            didUpdateValueFor characteristic: CBCharacteristic,
                            error: Error?)
@@ -415,17 +567,35 @@ extension BLECentral: CBPeripheralDelegate
 
         do
         {
-            let message = try BLETransport.decode(data)
+            // 分割パケットとしてデコード
+            if BLEMessagePacket.isPacket(data)
+            {
+                let packet = try BLEMessagePacket.decode(from: data)
 
-            delegate?.centralDidReceiveMessage(
-                message,
-                from: peripheral.identifier
-            )
+                guard let restoredData = messageAssembler.append(packet,
+                                                                 from: peripheral.identifier)
+                else
+                {
+                    return
+                }
 
+                let message = try BLETransport.decode(restoredData)
+
+                delegate?.centralDidReceiveMessage(message,
+                                                   from: peripheral.identifier)
+            }
+            else
+            {
+                let message = try BLETransport.decode(data)
+
+                delegate?.centralDidReceiveMessage(message,
+                                                   from: peripheral.identifier)
+            }
         }
         catch
         {
             print("BLE message decode error: \(error)")
         }
     }
+
 }

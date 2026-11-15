@@ -13,16 +13,37 @@ public final class BLEMessageAssembler
     private struct MessageBuffer
     {
         let totalChunks: Int
+        let createdAt: Date
         var chunks: [Int: Data] = [:]
     }
+    
+    // 1メッセージの最大サイズ：1MB
+    private let maxMessageSize = 1_048_576
 
-    private var buffers: [UUID: MessageBuffer] = [:]
+    // 全受信バッファの最大サイズ：10MB
+    private let maxTotalBufferSize = 10_485_760
+    
+    private let maxPendingMessages = 100
+    
+    private let timeout: TimeInterval = 30
+
+    private struct MessageKey: Hashable
+    {
+        let deviceID: UUID
+        let messageID: UUID
+    }
+
+    private var buffers: [MessageKey: MessageBuffer] = [:]
 
     public init() {}
-
+    
     @discardableResult
-    public func append(_ packet: BLEMessagePacket) -> Data?
+    public func append(_ packet: BLEMessagePacket,
+                       from deviceID: UUID) -> Data?
     {
+
+        removeExpiredMessages()
+
         guard packet.totalChunks > 0,
               packet.chunkIndex >= 0,
               packet.chunkIndex < packet.totalChunks
@@ -30,23 +51,62 @@ public final class BLEMessageAssembler
             return nil
         }
 
-        let messageID = packet.messageID
+        let key = MessageKey(
+            deviceID: deviceID,
+            messageID: packet.messageID
+        )
 
-        if buffers[messageID] == nil
+        if buffers[key] == nil
         {
-            buffers[messageID] = MessageBuffer(
-                totalChunks: packet.totalChunks
+            guard buffers.count < maxPendingMessages
+            else
+            {
+                return nil
+            }
+
+            buffers[key] = MessageBuffer(
+                totalChunks: packet.totalChunks,
+                createdAt: Date()
             )
         }
 
-        guard var buffer = buffers[messageID],
+        guard var buffer = buffers[key],
               buffer.totalChunks == packet.totalChunks
         else {
             return nil
         }
 
+        // 同じチャンクを再受信した場合のサイズも考慮
+        let previousSize = buffer.chunks[packet.chunkIndex]?.count ?? 0
+
+        let currentMessageSize = buffer.chunks.values.reduce(0)
+        {
+            $0 + $1.count
+        }
+
+        let newMessageSize = currentMessageSize - previousSize + packet.payload.count
+
+        // 1メッセージの上限を確認
+        guard newMessageSize <= maxMessageSize
+        else
+        {
+            buffers.removeValue(forKey: key)
+            return nil
+        }
+
+        // 全受信バッファの上限を確認
+        let newTotalSize = currentBufferSize() - previousSize + packet.payload.count
+
+        guard newTotalSize <= maxTotalBufferSize
+        else
+        {
+            buffers.removeValue(forKey: key)
+            return nil
+        }
+
+        // サイズに問題がなければ保存
         buffer.chunks[packet.chunkIndex] = packet.payload
-        buffers[messageID] = buffer
+        buffers[key] = buffer
 
         guard buffer.chunks.count == buffer.totalChunks
         else
@@ -56,22 +116,54 @@ public final class BLEMessageAssembler
 
         var result = Data()
 
-        for index in 0..<buffer.totalChunks {
+        for index in 0..<buffer.totalChunks
+        {
             guard let chunk = buffer.chunks[index]
             else
             {
                 return nil
             }
+
             result.append(chunk)
         }
 
-        buffers.removeValue(forKey: messageID)
+        buffers.removeValue(forKey: key)
 
         return result
     }
 
+    public func removeExpiredMessages()
+    {
+        let now = Date()
+
+        buffers = buffers.filter { _, buffer in
+            now.timeIntervalSince(buffer.createdAt) < timeout
+        }
+    }
+    
     public func reset()
     {
         buffers.removeAll()
     }
+    
+    
+    public func reset(for deviceID: UUID)
+    {
+        buffers = buffers.filter { key, _ in
+            key.deviceID != deviceID
+        }
+    }
+    
+    private func currentBufferSize() -> Int
+    {
+        buffers.values.reduce(0)
+        {
+            total, buffer in
+            total + buffer.chunks.values.reduce(0)
+            {
+                $0 + $1.count
+            }
+        }
+    }
+
 }

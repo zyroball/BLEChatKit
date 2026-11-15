@@ -62,30 +62,29 @@ public final class BLEChatManager
         central.disconnect(from: deviceID)
     }
 
+    
     @discardableResult
-    public func send(
-        _ message: String,
-        to deviceID: UUID
-    ) throws -> Bool {
+    public func send(_ message: String,
+                     to deviceID: UUID) throws -> Bool
+    {
+        if peripheralCentralIDs.contains(deviceID)
+        {
+            try peripheral.sendChunked(message,
+                                       to: deviceID)
 
-        if peripheralCentralIDs.contains(deviceID) {
-            return try peripheral.send(
-                message,
-                to: deviceID
-            )
+            return true
         }
 
-        if centralDeviceIDs.contains(deviceID) {
-            try central.send(
-                message,
-                to: deviceID
-            )
+        if centralDeviceIDs.contains(deviceID)
+        {
+            try central.sendChunked(message,
+                                    to: deviceID)
+
             return true
         }
 
         return false
     }
-
 }
 
 
