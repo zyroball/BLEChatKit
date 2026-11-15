@@ -16,13 +16,10 @@ let package = Package(
     ],
     targets: [
         .target(
-            name: "BLEChatKit",
-            path: "Sources/BLEChatKit"
+            name: "BLEChatKit"
         ),
         .testTarget(
             name: "BLEChatKitTests",
-            dependencies: ["BLEChatKit"],
-            path: "Tests/BLEChatKitTests"
+            dependencies: ["BLEChatKit"]
         )
-    ]
-)
+    ])

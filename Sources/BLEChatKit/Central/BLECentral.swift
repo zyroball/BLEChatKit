@@ -115,6 +115,47 @@ public final class BLECentral: NSObject
                               for: characteristic,
                               type: .withResponse)
     }
+    
+    
+    public func preparePackets(_ message: String,
+                               to deviceID: UUID) throws -> [BLEMessagePacket]
+    {
+        guard let peripheral = discoveredPeripherals[deviceID],
+              peripheral.state == .connected,
+              messageCharacteristics[deviceID] != nil
+        else {
+            throw BLETransportError.invalidMessage
+        }
+
+        let maximumLength =
+            peripheral.maximumWriteValueLength(
+                for: .withResponse
+            )
+
+        // 仮のチャンクサイズ。
+        // エンコード後のパケットサイズも考慮する。
+        let chunkSize = max(1, maximumLength / 2)
+
+        let packets = try BLEMessagePacketBuilder.build(
+            message: message,
+            chunkSize: chunkSize
+        )
+
+        // 実際に送信可能なサイズか検証
+        for packet in packets
+        {
+            let encodedData = try packet.encode()
+
+            guard encodedData.count <= maximumLength
+            else
+            {
+                throw BLETransportError.messageTooLarge
+            }
+        }
+
+        return packets
+    }
+
 }
 
 // MARK: - CBCentralManagerDelegate
