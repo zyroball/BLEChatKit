@@ -95,6 +95,24 @@ public final class BLEPeripheral: NSObject
             ]
         ])
     }
+    
+    
+    @discardableResult
+    public func send(_ message: String) throws -> Bool
+    {
+        guard peripheralManager.state == .poweredOn,
+              let characteristic = messageCharacteristic
+        else
+        {
+            return false
+        }
+
+        let data = try BLETransport.encode(message)
+
+        return peripheralManager.updateValue(data,
+                                             for: characteristic,
+                                             onSubscribedCentrals: nil)
+    }
 }
 
 // MARK: - CBPeripheralManagerDelegate
@@ -142,6 +160,14 @@ extension BLEPeripheral: CBPeripheralManagerDelegate
             serviceReady = false
             messageCharacteristic = nil
         }
+    }
+
+    
+    public func peripheralManagerIsReady(
+        toUpdateSubscribers peripheral: CBPeripheralManager
+    )
+    {
+        // 次のSTEPで送信待ちキューを処理する
     }
 
     

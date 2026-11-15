@@ -186,10 +186,15 @@ extension BLECentral: CBCentralManagerDelegate
                                  error: error)
     }
 
+    
     public func centralManager(_ central: CBCentralManager,
                                didDisconnectPeripheral peripheral: CBPeripheral,
                                error: Error?)
     {
+        messageCharacteristics.removeValue(
+            forKey: peripheral.identifier
+        )
+
         connection.updateState(for: peripheral,
                                to: .disconnected)
 
@@ -199,6 +204,7 @@ extension BLECentral: CBCentralManagerDelegate
                                                    error: error)
         }
     }
+
 }
 
 
@@ -238,6 +244,54 @@ extension BLECentral: CBPeripheralDelegate
             messageCharacteristics[
                 peripheral.identifier
             ] = characteristic
+            
+            peripheral.setNotifyValue(true,
+                                      for: characteristic)
+        }
+    }
+    
+    
+    public func peripheral(_ peripheral: CBPeripheral,
+                           didUpdateNotificationStateFor characteristic: CBCharacteristic,
+                           error: Error?)
+    {
+        guard error == nil,
+              characteristic.uuid == BLEUUID.message,
+              characteristic.isNotifying
+        else {
+            return
+        }
+        delegate?.centralDidBecomeReady(
+            deviceID: peripheral.identifier
+        )
+    }
+    
+    
+    public func peripheral(_ peripheral: CBPeripheral,
+                           didUpdateValueFor characteristic: CBCharacteristic,
+                           error: Error?)
+    {
+        guard error == nil,
+              characteristic.uuid == BLEUUID.message,
+              let data = characteristic.value
+        else
+        {
+            return
+        }
+
+        do
+        {
+            let message = try BLETransport.decode(data)
+
+            delegate?.centralDidReceiveMessage(
+                message,
+                from: peripheral.identifier
+            )
+
+        }
+        catch
+        {
+            print("BLE message decode error: \(error)")
         }
     }
 }
