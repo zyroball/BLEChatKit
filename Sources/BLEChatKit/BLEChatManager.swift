@@ -15,6 +15,9 @@ public final class BLEChatManager
 
     private let central: BLECentral
     private let peripheral: BLEPeripheral
+    
+    private var centralDeviceIDs = Set<UUID>()
+    private var peripheralCentralIDs = Set<UUID>()
 
     private var shouldRun = false
     private var isCentralReady = false
@@ -56,12 +59,30 @@ public final class BLEChatManager
         central.disconnect(from: deviceID)
     }
 
+    @discardableResult
     public func send(
         _ message: String,
         to deviceID: UUID
-    ) throws {
-        try central.send(message, to: deviceID)
+    ) throws -> Bool {
+
+        if peripheralCentralIDs.contains(deviceID) {
+            return try peripheral.send(
+                message,
+                to: deviceID
+            )
+        }
+
+        if centralDeviceIDs.contains(deviceID) {
+            try central.send(
+                message,
+                to: deviceID
+            )
+            return true
+        }
+
+        return false
     }
+
 }
 
 
@@ -78,12 +99,15 @@ extension BLEChatManager: BLECentralDelegate {
             central.startScan()
         }
     }
-
+    
     public func centralDidDiscover(
         _ device: BLEDevice
     ) {
+        centralDeviceIDs.insert(device.id)
+
         delegate?.chatManagerDidDiscover(device)
     }
+
 
     public func centralDidReceiveMessage(
         _ message: String,
@@ -139,6 +163,19 @@ extension BLEChatManager: BLEPeripheralDelegate {
             peripheral.startAdvertising()
         }
     }
+    
+    
+    public func peripheralDidSubscribe(
+        centralID: UUID
+    ) {
+        peripheralCentralIDs.insert(centralID)
+    }
+
+    public func peripheralDidUnsubscribe(
+        centralID: UUID
+    ) {
+        peripheralCentralIDs.remove(centralID)
+    }
 
     public func peripheralDidStartAdvertising() {
         // 必要なら広告開始イベントを公開する
@@ -151,11 +188,12 @@ extension BLEChatManager: BLEPeripheralDelegate {
     }
 
     public func peripheralDidReceiveMessage(
-        _ message: String
+        _ message: String,
+        from centralID: UUID
     ) {
-        // 現状のPeripheral受信イベントには
-        // 送信元Centralの識別子が含まれていない。
-        // 次のSTEPで送信元IDを渡せるようにする。
-        // ここでは誤ったUUIDを作って通知しない。
+        delegate?.chatManagerDidReceiveMessage(
+            message,
+            from: centralID
+        )
     }
 }

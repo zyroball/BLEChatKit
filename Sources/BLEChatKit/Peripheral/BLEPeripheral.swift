@@ -14,6 +14,8 @@ public final class BLEPeripheral: NSObject
     public weak var delegate: BLEPeripheralDelegate?
     private var peripheralManager: CBPeripheralManager!
     private var messageCharacteristic: CBMutableCharacteristic?
+    private var subscribedCentrals: [UUID: CBCentral] = [:]
+
 
     private var serviceReady = false
     private var advertisingRequested = false
@@ -96,23 +98,32 @@ public final class BLEPeripheral: NSObject
         ])
     }
     
-    
     @discardableResult
-    public func send(_ message: String) throws -> Bool
-    {
+    public func send(
+        _ message: String,
+        to centralID: UUID
+    ) throws -> Bool {
+
         guard peripheralManager.state == .poweredOn,
-              let characteristic = messageCharacteristic
-        else
-        {
+              let characteristic = messageCharacteristic,
+              let central = subscribedCentrals[centralID]
+        else {
             return false
         }
 
         let data = try BLETransport.encode(message)
 
-        return peripheralManager.updateValue(data,
-                                             for: characteristic,
-                                             onSubscribedCentrals: nil)
+        guard data.count <= central.maximumUpdateValueLength else {
+            throw BLETransportError.messageTooLarge
+        }
+
+        return peripheralManager.updateValue(
+            data,
+            for: characteristic,
+            onSubscribedCentrals: [central]
+        )
     }
+
 }
 
 // MARK: - CBPeripheralManagerDelegate
@@ -171,17 +182,17 @@ extension BLEPeripheral: CBPeripheralManagerDelegate
     }
 
     
-    public func peripheralManager(_ peripheral: CBPeripheralManager,
-                                  didReceiveWrite requests: [CBATTRequest])
-    {
-        for request in requests
-        {
+    
+    public func peripheralManager(
+        _ peripheral: CBPeripheralManager,
+        didReceiveWrite requests: [CBATTRequest]
+    ) {
+        for request in requests {
 
             guard request.characteristic.uuid == BLEUUID.message,
                   request.offset == 0,
                   let data = request.value
-            else
-            {
+            else {
                 peripheral.respond(
                     to: request,
                     withResult: .invalidPdu
@@ -189,18 +200,20 @@ extension BLEPeripheral: CBPeripheralManagerDelegate
                 continue
             }
 
-            do
-            {
+            do {
                 let message = try BLETransport.decode(data)
 
-                delegate?.peripheralDidReceiveMessage(message)
+                delegate?.peripheralDidReceiveMessage(
+                    message,
+                    from: request.central.identifier
+                )
 
-                peripheral.respond(to: request,
-                                   withResult: .success)
+                peripheral.respond(
+                    to: request,
+                    withResult: .success
+                )
 
-            }
-            catch
-            {
+            } catch {
                 peripheral.respond(
                     to: request,
                     withResult: .unlikelyError
@@ -208,6 +221,7 @@ extension BLEPeripheral: CBPeripheralManagerDelegate
             }
         }
     }
+
 
     
     public func peripheralManager(_ peripheral: CBPeripheralManager,
@@ -246,4 +260,40 @@ extension BLEPeripheral: CBPeripheralManagerDelegate
 
         delegate?.peripheralDidStartAdvertising()
     }
+    
+    
+    public func peripheralManager(
+        _ peripheral: CBPeripheralManager,
+        central: CBCentral,
+        didSubscribeTo characteristic: CBCharacteristic
+    ) {
+        guard characteristic.uuid == BLEUUID.message else {
+            return
+        }
+        
+        delegate?.peripheralDidSubscribe(
+            centralID: central.identifier
+        )
+
+        subscribedCentrals[central.identifier] = central
+    }
+
+    public func peripheralManager(
+        _ peripheral: CBPeripheralManager,
+        central: CBCentral,
+        didUnsubscribeFrom characteristic: CBCharacteristic
+    ) {
+        guard characteristic.uuid == BLEUUID.message else {
+            return
+        }
+        
+        delegate?.peripheralDidUnsubscribe(
+            centralID: central.identifier
+        )
+
+        subscribedCentrals.removeValue(
+            forKey: central.identifier
+        )
+    }
+
 }
