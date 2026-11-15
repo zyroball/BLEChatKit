@@ -23,4 +23,5 @@ public protocol BLEPeripheralDelegate: AnyObject
     func peripheralDidUpdateState(_ state: BLEPeripheralState)
     func peripheralDidStartAdvertising()
     func peripheralDidFailToAdvertise(error: Error)
+    func peripheralDidReceiveMessage(_ message: String)
 }

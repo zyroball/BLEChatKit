@@ -101,7 +101,6 @@ public final class BLEPeripheral: NSObject
 
 extension BLEPeripheral: CBPeripheralManagerDelegate
 {
-
     public func peripheralManagerDidUpdateState(_ peripheral: CBPeripheralManager)
     {
         let state: BLEPeripheralState
@@ -145,6 +144,46 @@ extension BLEPeripheral: CBPeripheralManagerDelegate
         }
     }
 
+    
+    public func peripheralManager(_ peripheral: CBPeripheralManager,
+                                  didReceiveWrite requests: [CBATTRequest])
+    {
+        for request in requests
+        {
+
+            guard request.characteristic.uuid == BLEUUID.message,
+                  request.offset == 0,
+                  let data = request.value
+            else
+            {
+                peripheral.respond(
+                    to: request,
+                    withResult: .invalidPdu
+                )
+                continue
+            }
+
+            do
+            {
+                let message = try BLETransport.decode(data)
+
+                delegate?.peripheralDidReceiveMessage(message)
+
+                peripheral.respond(to: request,
+                                   withResult: .success)
+
+            }
+            catch
+            {
+                peripheral.respond(
+                    to: request,
+                    withResult: .unlikelyError
+                )
+            }
+        }
+    }
+
+    
     public func peripheralManager(_ peripheral: CBPeripheralManager,
                                   didAdd service: CBService,
                                   error: Error?)

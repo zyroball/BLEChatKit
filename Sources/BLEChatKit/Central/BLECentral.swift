@@ -15,6 +15,7 @@ public final class BLECentral: NSObject
     private var centralManager: CBCentralManager!
     private var discoveredPeripherals:[UUID: CBPeripheral] = [:]
     public let connection = BLEConnection()
+    private var messageCharacteristics:[UUID: CBCharacteristic] = [:]
 
     public override init()
     {
@@ -91,6 +92,29 @@ public final class BLECentral: NSObject
             peripheral
         )
     }
+    
+    
+    public func send(_ message: String,
+                     to deviceID: UUID) throws
+    {
+        guard let peripheral = discoveredPeripherals[deviceID],peripheral.state == .connected, let characteristic = messageCharacteristics[deviceID]
+        else
+        {
+            throw BLETransportError.invalidMessage
+        }
+
+        let data = try BLETransport.encode(message)
+
+        guard data.count <= peripheral.maximumWriteValueLength(for: .withResponse)
+        else
+        {
+            throw BLETransportError.messageTooLarge
+        }
+
+        peripheral.writeValue(data,
+                              for: characteristic,
+                              type: .withResponse)
+    }
 }
 
 // MARK: - CBCentralManagerDelegate
@@ -137,13 +161,21 @@ extension BLECentral: CBCentralManagerDelegate
                                rssi: RSSI.intValue)
         delegate?.centralDidDiscover(device)
     }
-    
-    
-    public func centralManager(_ central: CBCentralManager,
-                               didConnect peripheral: CBPeripheral)
-    {
-        connection.updateState(for: peripheral,
-                               to: .connected)
+
+    public func centralManager(
+        _ central: CBCentralManager,
+        didConnect peripheral: CBPeripheral
+    ) {
+        peripheral.delegate = self
+
+        connection.updateState(
+            for: peripheral,
+            to: .connected
+        )
+
+        peripheral.discoverServices([
+            BLEUUID.service
+        ])
     }
 
     public func centralManager(_ central: CBCentralManager,
@@ -165,6 +197,47 @@ extension BLECentral: CBCentralManagerDelegate
         {
             connection.delegate?.connectionDidFail(deviceID: peripheral.identifier,
                                                    error: error)
+        }
+    }
+}
+
+
+
+extension BLECentral: CBPeripheralDelegate
+{
+    public func peripheral(_ peripheral: CBPeripheral,
+                           didDiscoverServices error: Error?)
+    {
+        guard error == nil,
+              let services = peripheral.services
+        else {
+            return
+        }
+
+        for service in services
+        where service.uuid == BLEUUID.service
+        {
+            peripheral.discoverCharacteristics([BLEUUID.message],
+                                               for: service)
+        }
+    }
+
+    public func peripheral(_ peripheral: CBPeripheral,
+                           didDiscoverCharacteristicsFor service: CBService,
+                           error: Error?)
+    {
+        guard error == nil,
+              let characteristics = service.characteristics
+        else {
+            return
+        }
+
+        for characteristic in characteristics
+        where characteristic.uuid == BLEUUID.message
+        {
+            messageCharacteristics[
+                peripheral.identifier
+            ] = characteristic
         }
     }
 }
