@@ -16,6 +16,9 @@ public final class BLECentral: NSObject
     private var discoveredPeripherals:[UUID: CBPeripheral] = [:]
     public let connection = BLEConnection()
     private var messageCharacteristics:[UUID: CBCharacteristic] = [:]
+    
+    private var packetQueues: [UUID: [Data]] = [:]
+    private var writingDevices: Set<UUID> = []
 
     public override init()
     {
@@ -155,7 +158,54 @@ public final class BLECentral: NSObject
 
         return packets
     }
+    
+    
+    public func sendChunked(_ message: String,
+                            to deviceID: UUID) throws
+    {
+        guard let peripheral = discoveredPeripherals[deviceID],
+              peripheral.state == .connected,
+              messageCharacteristics[deviceID] != nil
+        else {
+            throw BLETransportError.invalidMessage
+        }
 
+        let packets = try preparePackets(
+            message,
+            to: deviceID
+        )
+
+        let encodedPackets = try packets.map
+        {
+            try $0.encode()
+        }
+
+        packetQueues[deviceID, default: []]
+            .append(contentsOf: encodedPackets)
+
+        sendNextPacket(to: deviceID)
+    }
+    
+    
+    private func sendNextPacket(to deviceID: UUID)
+    {
+
+        guard !writingDevices.contains(deviceID),
+              let peripheral = discoveredPeripherals[deviceID],
+              peripheral.state == .connected,
+              let characteristic = messageCharacteristics[deviceID],
+              let packet = packetQueues[deviceID]?.first
+        else {
+            return
+        }
+
+        writingDevices.insert(deviceID)
+
+        peripheral.writeValue(packet,
+                              for: characteristic,
+                              type: .withResponse
+        )
+    }
 }
 
 // MARK: - CBCentralManagerDelegate
@@ -252,6 +302,49 @@ extension BLECentral: CBCentralManagerDelegate
 
 extension BLECentral: CBPeripheralDelegate
 {
+    
+    public func peripheral(_ peripheral: CBPeripheral,
+                           didWriteValueFor characteristic: CBCharacteristic,
+        error: Error?)
+    {
+
+        let deviceID = peripheral.identifier
+
+        guard writingDevices.contains(deviceID)
+        else
+        {
+            return
+        }
+
+        writingDevices.remove(deviceID)
+
+        if let error = error
+        {
+            print("BLE write failed:", error)
+
+            packetQueues.removeValue(forKey: deviceID)
+            return
+        }
+
+        guard packetQueues[deviceID]?.isEmpty == false
+        else
+        {
+            return
+        }
+
+        packetQueues[deviceID]?.removeFirst()
+
+        if packetQueues[deviceID]?.isEmpty == true
+        {
+            packetQueues.removeValue(forKey: deviceID)
+            print("BLE chunked write completed")
+            return
+        }
+
+        sendNextPacket(to: deviceID)
+    }
+
+    
     public func peripheral(_ peripheral: CBPeripheral,
                            didDiscoverServices error: Error?)
     {

@@ -11,6 +11,7 @@ import CoreBluetooth
 
 public final class BLEPeripheral: NSObject
 {
+    private let messageAssembler = BLEMessageAssembler()
     public weak var delegate: BLEPeripheralDelegate?
     private var peripheralManager: CBPeripheralManager!
     private var messageCharacteristic: CBMutableCharacteristic?
@@ -99,10 +100,9 @@ public final class BLEPeripheral: NSObject
     }
     
     @discardableResult
-    public func send(
-        _ message: String,
-        to centralID: UUID
-    ) throws -> Bool {
+    public func send(_ message: String,
+                     to centralID: UUID) throws -> Bool
+    {
 
         guard peripheralManager.state == .poweredOn,
               let characteristic = messageCharacteristic,
@@ -123,6 +123,37 @@ public final class BLEPeripheral: NSObject
             onSubscribedCentrals: [central]
         )
     }
+    
+    
+    private func handleReceivedPacket(_ data: Data,
+                                      from central: CBCentral)
+    {
+        do
+        {
+            let packet = try BLEMessagePacket.decode(
+                from: data
+            )
+
+            guard let restoredData = messageAssembler.append(packet)
+            else
+            {
+                // まだ全チャンクが揃っていない
+                return
+            }
+
+            let message = try BLETransport.decode(restoredData)
+
+            print("BLE message restored:", message)
+
+            // ここで既存の受信通知処理を呼び出す
+
+        }
+        catch
+        {
+            print("BLE packet decode failed:", error)
+        }
+    }
+
 
 }
 
@@ -180,14 +211,12 @@ extension BLEPeripheral: CBPeripheralManagerDelegate
     {
         // 次のSTEPで送信待ちキューを処理する
     }
-
     
-    
-    public func peripheralManager(
-        _ peripheral: CBPeripheralManager,
-        didReceiveWrite requests: [CBATTRequest]
-    ) {
-        for request in requests {
+    public func peripheralManager(_ peripheral: CBPeripheralManager,
+                                  didReceiveWrite requests: [CBATTRequest])
+    {
+        for request in requests
+        {
 
             guard request.characteristic.uuid == BLEUUID.message,
                   request.offset == 0,
@@ -200,27 +229,44 @@ extension BLEPeripheral: CBPeripheralManagerDelegate
                 continue
             }
 
-            do {
-                let message = try BLETransport.decode(data)
+            do
+            {
+                // 分割パケットとしてデコードを試す
+                if let packet = try? BLEMessagePacket.decode(from: data)
+                {
+                    if let restoredData = messageAssembler.append(packet)
+                    {
+                        let message = try BLETransport.decode(restoredData)
 
-                delegate?.peripheralDidReceiveMessage(
-                    message,
-                    from: request.central.identifier
-                )
+                        delegate?.peripheralDidReceiveMessage(
+                            message,
+                            from: request.central.identifier
+                        )
+                    }
 
-                peripheral.respond(
-                    to: request,
-                    withResult: .success
-                )
+                }
+                else
+                {
+                    // 従来の通常メッセージ
+                    let message = try BLETransport.decode(data)
 
-            } catch {
-                peripheral.respond(
-                    to: request,
-                    withResult: .unlikelyError
-                )
+                    delegate?.peripheralDidReceiveMessage(message,
+                                                          from: request.central.identifier
+                    )
+                }
+
+                peripheral.respond(to: request,
+                                   withResult: .success)
+
+            }
+            catch
+            {
+                peripheral.respond(to: request,
+                                   withResult: .unlikelyError)
             }
         }
     }
+
 
 
     
