@@ -597,6 +597,8 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate
                 peripheral.identifier
             ] = characteristic
             
+            print("[BLECentral] setNotifyValue:", peripheral.identifier)
+            
             peripheral.setNotifyValue(true,
                                       for: characteristic)
         }
