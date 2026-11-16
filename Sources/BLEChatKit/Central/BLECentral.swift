@@ -569,20 +569,33 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate
         sendNextPacket(to: deviceID)
     }
 
-    public func peripheral(_ peripheral: CBPeripheral,
-                           didDiscoverServices error: Error?)
-    {
+    public func peripheral(
+        _ peripheral: CBPeripheral,
+        didDiscoverServices error: Error?
+    ) {
         guard error == nil,
               let services = peripheral.services
         else {
             return
         }
 
+        print(
+            "[BLECentral] didDiscoverServices:",
+            peripheral.identifier
+        )
+
         for service in services
         where service.uuid == BLEUUID.service
         {
-            peripheral.discoverCharacteristics([BLEUUID.message],
-                                               for: service)
+            print(
+                "[BLECentral] discoverCharacteristics:",
+                peripheral.identifier
+            )
+
+            peripheral.discoverCharacteristics(
+                [BLEUUID.message],
+                for: service
+            )
         }
     }
 
