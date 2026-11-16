@@ -35,6 +35,10 @@ public final class BLEChatManager
     public var readyDeviceIDs: Set<UUID> {
         readyCentralDeviceIDs.union(peripheralCentralIDs)
     }
+    
+    public var isScanning: Bool {
+        central.isScanning
+    }
 
     private var shouldRun = false
     private var isCentralReady = false

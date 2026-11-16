@@ -24,6 +24,9 @@ public final class BLECentral: NSObject
     private var retryCounts: [UUID: Int] = [:]
     private let maxRetryCount = 3
     
+    public var isScanning: Bool {
+        centralManager.isScanning
+    }
     
     private struct OutgoingPacket
     {
