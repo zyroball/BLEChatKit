@@ -1,4 +1,5 @@
 //
+//
 //  BLEChatManager.swift
 //  BLEChatKit
 //
@@ -147,6 +148,24 @@ public final class BLEChatManager
 
 extension BLEChatManager: BLECentralDelegate
 {
+    public func centralDidDisconnect(deviceID: UUID) {
+
+        // Central側のReady状態を解除
+        readyCentralDeviceIDs.remove(deviceID)
+
+        // 接続デバイスの登録を解除
+        centralDeviceIDs.remove(deviceID)
+
+        // 接続状態を更新
+        connectionStates[deviceID] = .disconnected
+
+        // アプリ側へ切断を通知
+        delegate?.chatManagerDidChangeConnectionState(
+            deviceID: deviceID,
+            state: .disconnected
+        )
+    }
+    
     public func centralDidFinishSending(messageID: UUID,
                                         to deviceID: UUID)
     {
@@ -222,14 +241,17 @@ extension BLEChatManager: BLECentralDelegate
         )
     }
     
-    public func centralDidBecomeReady(deviceID: UUID)
-    {
-        // 通信準備が完了したデバイスを登録
-        readyCentralDeviceIDs.insert(deviceID)
+    public func centralDidBecomeReady(deviceID: UUID) {
+
+        // 初めてReadyになった場合だけ通知
+        let inserted = readyCentralDeviceIDs.insert(deviceID).inserted
+
+        guard inserted else {
+            return
+        }
 
         delegate?.chatManagerDidBecomeReady(deviceID: deviceID)
     }
-
 }
 
 

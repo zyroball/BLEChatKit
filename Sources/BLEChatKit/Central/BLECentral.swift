@@ -460,6 +460,8 @@ extension BLECentral: @preconcurrency CBCentralManagerDelegate
             connection.delegate?.connectionDidFail(deviceID: deviceID,
                                                    error: error)
         }
+        
+        delegate?.centralDidDisconnect(deviceID: deviceID)
     }
 }
 
