@@ -145,14 +145,19 @@ extension BLEChatManager: BLECentralDelegate
     
     public func centralDidUpdateState(_ state: BLECentralState)
     {
-
         isCentralReady = (state == .poweredOn)
 
         if !isCentralReady
         {
-            // Central側のデバイス情報をクリア
+
             centralDeviceIDs.removeAll()
             readyCentralDeviceIDs.removeAll()
+
+            // Central側の接続状態をリセット
+            for deviceID in connectionStates.keys
+            {
+                connectionStates[deviceID] = .disconnected
+            }
         }
 
         delegate?.chatManagerDidUpdateBluetoothState(state)
