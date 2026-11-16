@@ -16,6 +16,9 @@ public final class BLEChatManager
     private let central: BLECentral
     private let peripheral: BLEPeripheral
     
+    public var onSendCompleted: ((_ messageID: UUID,
+                                  _ deviceID: UUID) -> Void)?
+
     private var centralDeviceIDs = Set<UUID>()
     private var peripheralCentralIDs = Set<UUID>()
 
@@ -90,9 +93,19 @@ public final class BLEChatManager
 
 extension BLEChatManager: BLECentralDelegate {
 
-    public func centralDidUpdateState(
-        _ state: BLECentralState
-    ) {
+    
+
+    public func centralDidFinishSending(messageID: UUID,
+                                        to deviceID: UUID)
+    {
+
+        print("BLE message sent:",messageID,"to:",deviceID)
+
+        onSendCompleted?(messageID,deviceID)
+    }
+
+    public func centralDidUpdateState(_ state: BLECentralState)
+    {
         isCentralReady = (state == .poweredOn)
 
         delegate?.chatManagerDidUpdateBluetoothState(state)
@@ -102,10 +115,12 @@ extension BLEChatManager: BLECentralDelegate {
         }
     }
     
-    public func centralDidFailToSend(to deviceID: UUID,
+    
+    public func centralDidFailToSend(messageID: UUID,
+                                     to deviceID: UUID,
                                      error: Error)
     {
-        // 必要な場合だけ実装する
+        print("BLE send failed:",messageID,deviceID,error)
     }
     
     public func centralDidDiscover(

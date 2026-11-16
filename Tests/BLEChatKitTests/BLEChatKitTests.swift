@@ -128,7 +128,4 @@ final class BLEChatKitTests: XCTestCase
 
         print("Message size limit test passed")
     }
-
-
-
 }

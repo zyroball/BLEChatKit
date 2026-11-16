@@ -23,7 +23,16 @@ public final class BLECentral: NSObject
     private var retryCounts: [UUID: Int] = [:]
     private let maxRetryCount = 3
     
-    private var packetQueues: [UUID: [Data]] = [:]
+    
+    private struct OutgoingPacket
+    {
+        let messageID: UUID
+        let data: Data
+        let isLastChunk: Bool
+    }
+
+    private var packetQueues: [UUID: [OutgoingPacket]] = [:]
+    
     private var writingDevices: Set<UUID> = []
     
     private var writeTimeoutTasks: [UUID: DispatchWorkItem] = [:]
@@ -81,6 +90,7 @@ public final class BLECentral: NSObject
                                options: nil)
     }
 
+    
     public func disconnect(from deviceID: UUID)
     {
         guard let peripheral = discoveredPeripherals[deviceID]
@@ -90,22 +100,24 @@ public final class BLECentral: NSObject
 
         guard connection.state(for: deviceID) == .connected
             || connection.state(for: deviceID) == .connecting
-        else
-        {
+        else {
             return
         }
 
-        connection.updateState(
-            for: peripheral,
-            to: .disconnecting
-        )
+        // 切断処理中として登録
+        disconnectingDevices.insert(deviceID)
 
-        centralManager.cancelPeripheralConnection(
-            peripheral
-        )
+        // 送受信状態をクリア
+        cleanupConnection(for: deviceID)
+
+        // 接続状態を更新
+        connection.updateState(for: peripheral,
+                               to: .disconnecting)
+
+        // BLE接続を切断
+        centralManager.cancelPeripheralConnection(peripheral)
     }
-    
-    
+
     public func send(_ message: String,
                      to deviceID: UUID) throws
     {
@@ -144,19 +156,12 @@ public final class BLECentral: NSObject
                 for: .withResponse
             )
 
-        // エンコード後のパケットサイズも考慮する。
-        let chunkSize = min(maximumLength - BLEMessagePacket.headerSize,
-                            Int(UInt16.max))
+        let chunkSize = min(
+            maximumLength - BLEMessagePacket.headerSize,
+            Int(UInt16.max)
+        )
 
-        guard chunkSize > 0
-        else
-        {
-            throw BLETransportError.messageTooLarge
-        }
-
-        guard chunkSize > 0
-        else
-        {
+        guard chunkSize > 0 else {
             throw BLETransportError.messageTooLarge
         }
 
@@ -179,12 +184,15 @@ public final class BLECentral: NSObject
     }
     
     
+    
     public func sendChunked(_ message: String,
                             to deviceID: UUID) throws
     {
+
         guard let peripheral = discoveredPeripherals[deviceID],
               peripheral.state == .connected,
-              messageCharacteristics[deviceID] != nil
+              messageCharacteristics[deviceID] != nil,
+              !disconnectingDevices.contains(deviceID)
         else {
             throw BLETransportError.invalidMessage
         }
@@ -194,16 +202,24 @@ public final class BLECentral: NSObject
             to: deviceID
         )
 
-        let encodedPackets = try packets.map
-        {
-            try $0.encode()
+        // 各パケットに最終チャンク情報を付与
+        let outgoingPackets = try packets.enumerated().map {
+            index, packet in
+
+            OutgoingPacket(
+                messageID: packet.messageID,
+                data: try packet.encode(),
+                isLastChunk: index == packets.count - 1
+            )
         }
 
-        packetQueues[deviceID, default: []]
-            .append(contentsOf: encodedPackets)
+        // デバイスごとの送信キューに追加
+        packetQueues[deviceID, default: []].append(contentsOf: outgoingPackets)
 
+        // 送信中でなければ送信開始
         sendNextPacket(to: deviceID)
     }
+
     
     
     private func cleanupConnection(for deviceID: UUID)
@@ -224,6 +240,31 @@ public final class BLECentral: NSObject
     }
     
     
+    
+    private func failPendingMessages(for deviceID: UUID,
+                                     error: Error)
+    {
+
+        // 失敗対象のメッセージIDを先に確定
+        let messageIDs = Array(
+            Set(
+                packetQueues[deviceID]?.map(\.messageID) ?? []
+            )
+        )
+
+        // 通知前に送信状態をクリア
+        cleanupConnection(for: deviceID)
+
+        // キューの状態が確定してから通知
+        for messageID in messageIDs {
+
+            delegate?.centralDidFailToSend(messageID: messageID,
+                                           to: deviceID,
+                                           error: error)
+        }
+    }
+
+    
     private func sendNextPacket(to deviceID: UUID)
     {
         guard !writingDevices.contains(deviceID),
@@ -235,18 +276,25 @@ public final class BLECentral: NSObject
         else {
             return
         }
+        
+        guard let messageID =
+            self.packetQueues[deviceID]?.first?.messageID
+        else {
+            return
+        }
 
+        // 書き込み中として登録
         writingDevices.insert(deviceID)
 
-        // ★ タイムアウト監視開始
+        // タイムアウト監視開始
         startWriteTimeout(for: deviceID)
 
-        peripheral.writeValue(packet,
+        // パケットデータを送信
+        peripheral.writeValue(packet.data,
                               for: characteristic,
                               type: .withResponse)
     }
 
-    
     private func cancelWriteTimeout(for deviceID: UUID)
     {
         writeTimeoutTasks[deviceID]?.cancel()
@@ -255,14 +303,12 @@ public final class BLECentral: NSObject
     
     
     
-    private func startWriteTimeout(for deviceID: UUID)
-    {
+    private func startWriteTimeout(for deviceID: UUID) {
 
         cancelWriteTimeout(for: deviceID)
 
-        let task = DispatchWorkItem
-        {
-            [weak self] in
+        
+        let task = DispatchWorkItem { [weak self] in
 
             guard let self else { return }
 
@@ -277,9 +323,14 @@ public final class BLECentral: NSObject
             // 切断処理中にする
             self.disconnectingDevices.insert(deviceID)
 
-            // 送受信状態をクリア
-            self.cleanupConnection(for: deviceID)
+            let error = NSError(domain: "BLEChatKit",
+                                code: 1001,
+                                userInfo: [NSLocalizedDescriptionKey:"BLE write operation timed out."]
+            )
 
+            // キュー内の全メッセージに失敗通知
+            self.failPendingMessages(for: deviceID,
+                                     error: error)
             // BLE接続を切断
             if let peripheral = self.discoveredPeripherals[deviceID],
                peripheral.state != .disconnected
@@ -296,8 +347,6 @@ public final class BLECentral: NSObject
         DispatchQueue.main.asyncAfter(deadline: .now() + writeTimeout,
                                       execute: task)
     }
-
-
 }
 
 // MARK: - CBCentralManagerDelegate
@@ -415,10 +464,12 @@ extension BLECentral: CBCentralManagerDelegate
 
 extension BLECentral: CBPeripheralDelegate
 {
+
     public func peripheral(_ peripheral: CBPeripheral,
                            didWriteValueFor characteristic: CBCharacteristic,
                            error: Error?)
     {
+
         guard characteristic.uuid == BLEUUID.message
         else
         {
@@ -427,9 +478,9 @@ extension BLECentral: CBPeripheralDelegate
 
         let deviceID = peripheral.identifier
 
-        // 切断処理中、または送信中でなければ無視
         guard !disconnectingDevices.contains(deviceID),
-              writingDevices.contains(deviceID)
+              writingDevices.contains(deviceID),
+              let packet = packetQueues[deviceID]?.first
         else {
             return
         }
@@ -437,75 +488,75 @@ extension BLECentral: CBPeripheralDelegate
         // 書き込み応答を受信したのでタイマー解除
         cancelWriteTimeout(for: deviceID)
 
-        // 書き込み失敗
-        if let error = error
-        {
+        // MARK: - 書き込み失敗
+        if let error {
 
             let retryCount = retryCounts[deviceID] ?? 0
-
-            // 最大再送回数に達した場合
             guard retryCount < maxRetryCount
             else
             {
-
                 print("BLE send failed:", deviceID, error)
 
-                // ★ 追加：アプリ側へ送信失敗を通知
-                delegate?.centralDidFailToSend(
-                    to: deviceID,
-                    error: error
-                )
+                // 切断処理中として登録
+                disconnectingDevices.insert(deviceID)
 
-                // 送信状態をクリア
-                packetQueues.removeValue(forKey: deviceID)
-                writingDevices.remove(deviceID)
-                retryCounts.removeValue(forKey: deviceID)
+                // キュー内の全メッセージに失敗通知
+                // 通知前に送信状態もクリアされる
+                failPendingMessages(for: deviceID,
+                                    error: error)
+
+                // 接続状態を更新して切断
+                if peripheral.state != .disconnected {
+
+                    connection.updateState(for: peripheral,
+                                           to: .disconnecting)
+
+                    centralManager.cancelPeripheralConnection(peripheral)
+                }
 
                 return
             }
 
-            // 再送回数を更新
+
             retryCounts[deviceID] = retryCount + 1
 
-            print(
-                "BLE retry:",
-                retryCount + 1,
-                "/",
-                maxRetryCount
-            )
+            print("BLE retry:",retryCount + 1,"/",maxRetryCount)
 
-            // 同じパケットを再送
-            if let data = packetQueues[deviceID]?.first
-            {
+            // 同じチャンクを再送
+            startWriteTimeout(for: deviceID)
 
-                startWriteTimeout(for: deviceID)
-
-                peripheral.writeValue(
-                    data,
-                    for: characteristic,
-                    type: .withResponse
-                )
-            }
+            peripheral.writeValue(packet.data,
+                                  for: characteristic,
+                                  type: .withResponse)
 
             return
         }
 
-        // 書き込み成功
+        // MARK: - 書き込み成功
+
         retryCounts.removeValue(forKey: deviceID)
 
-        // 送信済みパケットを削除
-        if packetQueues[deviceID]?.isEmpty == false
-        {
-            packetQueues[deviceID]?.removeFirst()
-        }
+        // 送信済みチャンクをキューから削除
+        packetQueues[deviceID]?.removeFirst()
 
-        // 送信状態を解除
+        // 書き込み状態を解除
         writingDevices.remove(deviceID)
 
-        // 次のパケットへ
+        // メッセージの最終チャンクなら通知
+        if packet.isLastChunk
+        {
+            delegate?.centralDidFinishSending(messageID: packet.messageID,
+                                              to: deviceID)
+        }
+
+        // キューが空なら削除
+        if packetQueues[deviceID]?.isEmpty == true {
+            packetQueues.removeValue(forKey: deviceID)
+        }
+
+        // 次のチャンクを送信
         sendNextPacket(to: deviceID)
     }
-
 
     public func peripheral(_ peripheral: CBPeripheral,
                            didDiscoverServices error: Error?)

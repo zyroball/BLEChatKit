@@ -13,6 +13,7 @@ public final class BLEPeripheral: NSObject
 {
     private let messageAssembler = BLEMessageAssembler()
     private var notificationQueues: [UUID: [Data]] = [:]
+    private var sendingCentrals: Set<UUID> = []
     public weak var delegate: BLEPeripheralDelegate?
     private var peripheralManager: CBPeripheralManager!
     private var messageCharacteristic: CBMutableCharacteristic?
@@ -104,29 +105,23 @@ public final class BLEPeripheral: NSObject
         ])
     }
     
+    
     @discardableResult
     public func send(_ message: String,
                      to centralID: UUID) throws -> Bool
     {
-
         guard peripheralManager.state == .poweredOn,
-              let characteristic = messageCharacteristic,
-              let central = subscribedCentrals[centralID]
+              messageCharacteristic != nil,
+              subscribedCentrals[centralID] != nil
         else {
             return false
         }
 
-        let data = try BLETransport.encode(message)
+        // 通常メッセージも分割送信処理へ統一
+        try sendChunked(message,
+                        to: centralID)
 
-        guard data.count <= central.maximumUpdateValueLength else {
-            throw BLETransportError.messageTooLarge
-        }
-
-        return peripheralManager.updateValue(
-            data,
-            for: characteristic,
-            onSubscribedCentrals: [central]
-        )
+        return true
     }
 
     public func sendChunked(_ message: String,
@@ -192,19 +187,34 @@ public final class BLEPeripheral: NSObject
                              characteristic: characteristic)
     }
 
+    
+    
     private func sendNextNotification(to centralID: UUID,
                                       characteristic: CBMutableCharacteristic)
     {
-        guard let central = subscribedCentrals[centralID],
-              var queue = notificationQueues[centralID]
+
+        // 同じCentralへの送信処理が実行中なら終了
+        guard !sendingCentrals.contains(centralID)
         else
         {
             return
         }
 
-        while !queue.isEmpty
+        guard let central = subscribedCentrals[centralID]
+        else
         {
-            let data = queue[0]
+            return
+        }
+
+        sendingCentrals.insert(centralID)
+
+        defer
+        {
+            sendingCentrals.remove(centralID)
+        }
+
+        while let data = notificationQueues[centralID]?.first
+        {
 
             let success = peripheralManager.updateValue(data,
                                                         for: characteristic,
@@ -217,17 +227,23 @@ public final class BLEPeripheral: NSObject
                 break
             }
 
-            queue.removeFirst()
+            notificationQueues[centralID]?.removeFirst()
+
+            if notificationQueues[centralID]?.isEmpty == true
+            {
+                notificationQueues.removeValue(forKey: centralID)
+            }
         }
 
-        notificationQueues[centralID] = queue.isEmpty ? nil : queue
-
-        if queue.isEmpty
+        if notificationQueues[centralID]?.isEmpty != false
         {
+
             cancelNotificationTimeout(for: centralID)
+
         }
         else if notificationTimeoutTasks[centralID] == nil
         {
+
             startNotificationTimeout(for: centralID)
         }
     }
@@ -267,6 +283,35 @@ public final class BLEPeripheral: NSObject
         }
     }
     
+    
+    private func cleanupAllConnections()
+    {
+        // 送信キューをすべて削除
+        notificationQueues.removeAll()
+
+        // タイムアウト監視をすべて解除
+        for task in notificationTimeoutTasks.values
+        {
+            task.cancel()
+        }
+
+        notificationTimeoutTasks.removeAll()
+
+        // 送信中フラグをすべて解除
+        sendingCentrals.removeAll()
+
+        // 受信途中の分割データを破棄
+        for centralID in subscribedCentrals.keys
+        {
+            messageAssembler.reset(for: centralID)
+        }
+
+        // 購読デバイスをすべて削除
+        subscribedCentrals.removeAll()
+
+        print("BLE peripheral connections cleaned up")
+    }
+    
     private func notificationQueueSize(for centralID: UUID) -> Int
     {
         notificationQueues[centralID]?.reduce(0) { $0 + $1.count } ?? 0
@@ -278,7 +323,6 @@ public final class BLEPeripheral: NSObject
         notificationTimeoutTasks.removeValue(forKey: centralID)
     }
     
-    
     private func startNotificationTimeout(for centralID: UUID)
     {
         cancelNotificationTimeout(for: centralID)
@@ -289,28 +333,26 @@ public final class BLEPeripheral: NSObject
 
             // 未送信パケットが残っているか確認
             guard self.notificationQueues[centralID]?.isEmpty == false
-            else
-            {
+            else {
                 self.cancelNotificationTimeout(for: centralID)
                 return
             }
 
             print("BLE notification timeout:", centralID)
 
-            // ★ ここに追加！
-            // アプリ側に送信失敗を通知
-            self.delegate?.peripheralDidFailToSend(
-                to: centralID,
-                error: BLESendError.notificationTimeout
-            )
-
-            // 送信待ちキューを破棄
+            // 通知前に送信キューを破棄
             self.notificationQueues.removeValue(
                 forKey: centralID
             )
 
             // タイムアウト監視を解除
             self.cancelNotificationTimeout(for: centralID)
+
+            // 状態をクリアした後にアプリへ通知
+            self.delegate?.peripheralDidFailToSend(
+                to: centralID,
+                error: BLESendError.notificationTimeout
+            )
         }
 
         notificationTimeoutTasks[centralID] = task
@@ -320,7 +362,6 @@ public final class BLEPeripheral: NSObject
             execute: task
         )
     }
-
 }
 
 // MARK: - CBPeripheralManagerDelegate
@@ -367,6 +408,9 @@ extension BLEPeripheral: CBPeripheralManagerDelegate
         {
             serviceReady = false
             messageCharacteristic = nil
+
+            // Bluetoothが使用できない場合は通信状態を破棄
+            cleanupAllConnections()
         }
     }
 
@@ -493,6 +537,7 @@ extension BLEPeripheral: CBPeripheralManagerDelegate
     }
     
     
+    
     public func peripheralManager(_ peripheral: CBPeripheralManager,
                                   central: CBCentral,
                                   didSubscribeTo characteristic: CBCharacteristic)
@@ -502,12 +547,16 @@ extension BLEPeripheral: CBPeripheralManagerDelegate
         {
             return
         }
-        
-        delegate?.peripheralDidSubscribe(centralID: central.identifier)
 
-        subscribedCentrals[central.identifier] = central
+        let centralID = central.identifier
+
+        // 先に購読デバイスを登録
+        subscribedCentrals[centralID] = central
+
+        // 登録完了後にアプリ側へ通知
+        delegate?.peripheralDidSubscribe(centralID: centralID)
     }
-
+    
     
     public func peripheralManager(_ peripheral: CBPeripheralManager,
                                   central: CBCentral,
@@ -519,21 +568,23 @@ extension BLEPeripheral: CBPeripheralManagerDelegate
             return
         }
 
-        let deviceID = central.identifier
+        let centralID = central.identifier
 
         // 購読デバイスを削除
-        subscribedCentrals.removeValue(forKey: deviceID)
+        subscribedCentrals.removeValue(forKey: centralID)
 
-        // 未送信パケットを破棄
-        notificationQueues.removeValue(forKey: deviceID)
-        
-        cancelNotificationTimeout(for: deviceID)
+        // 未送信キューを破棄
+        notificationQueues.removeValue(forKey: centralID)
 
-        // このデバイスの受信途中データを破棄
-        messageAssembler.reset(for: deviceID)
+        // タイムアウト監視を解除
+        cancelNotificationTimeout(for: centralID)
 
-        print("BLE central unsubscribed:", deviceID)
+        // 送信中フラグを解除
+        sendingCentrals.remove(centralID)
+
+        // 受信途中の分割データを破棄
+        messageAssembler.reset(for: centralID)
+
+        print("BLE central unsubscribed:", centralID)
     }
-
-
 }

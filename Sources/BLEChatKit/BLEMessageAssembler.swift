@@ -26,6 +26,10 @@ public final class BLEMessageAssembler
     private let maxPendingMessages = 100
     
     private let timeout: TimeInterval = 30
+    
+    internal var nowProvider: () -> Date = {
+        Date()
+    }
 
     private struct MessageKey: Hashable
     {
@@ -34,6 +38,24 @@ public final class BLEMessageAssembler
     }
 
     private var buffers: [MessageKey: MessageBuffer] = [:]
+    private let lock = NSLock()
+    
+    // テストから受信バッファの状態を確認する
+    internal var bufferedByteCount: Int
+    {
+        lock.lock()
+        defer { lock.unlock() }
+
+        return currentBufferSize()
+    }
+
+    internal var pendingMessageCount: Int
+    {
+        lock.lock()
+        defer { lock.unlock() }
+
+        return buffers.count
+    }
 
     public init() {}
     
@@ -42,7 +64,13 @@ public final class BLEMessageAssembler
                        from deviceID: UUID) -> Data?
     {
 
-        removeExpiredMessages()
+        lock.lock()
+        defer
+        {
+            lock.unlock()
+        }
+
+        removeExpiredMessagesLocked()
 
         guard packet.totalChunks > 0,
               packet.chunkIndex >= 0,
@@ -66,13 +94,19 @@ public final class BLEMessageAssembler
 
             buffers[key] = MessageBuffer(
                 totalChunks: packet.totalChunks,
-                createdAt: Date()
+                createdAt: nowProvider()
             )
         }
 
         guard var buffer = buffers[key],
               buffer.totalChunks == packet.totalChunks
         else {
+            return nil
+        }
+        
+        // 受信済みのチャンクは上書きしない
+        if buffer.chunks[packet.chunkIndex] != nil
+        {
             return nil
         }
 
@@ -134,7 +168,15 @@ public final class BLEMessageAssembler
 
     public func removeExpiredMessages()
     {
-        let now = Date()
+        lock.lock()
+        defer { lock.unlock() }
+
+        removeExpiredMessagesLocked()
+    }
+
+    private func removeExpiredMessagesLocked() {
+
+        let now = nowProvider()
 
         buffers = buffers.filter { _, buffer in
             now.timeIntervalSince(buffer.createdAt) < timeout
@@ -143,12 +185,22 @@ public final class BLEMessageAssembler
     
     public func reset()
     {
+        lock.lock()
+        defer
+        {
+            lock.unlock()
+        }
         buffers.removeAll()
     }
     
     
     public func reset(for deviceID: UUID)
     {
+        lock.lock()
+        defer
+        {
+            lock.unlock()
+        }
         buffers = buffers.filter { key, _ in
             key.deviceID != deviceID
         }
