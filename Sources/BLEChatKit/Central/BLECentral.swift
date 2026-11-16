@@ -569,10 +569,9 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate
         sendNextPacket(to: deviceID)
     }
 
-    public func peripheral(
-        _ peripheral: CBPeripheral,
-        didDiscoverServices error: Error?
-    ) {
+    public func peripheral(_ peripheral: CBPeripheral,
+                           didDiscoverServices error: Error?)
+    {
         guard error == nil,
               let services = peripheral.services
         else {
@@ -580,22 +579,22 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate
         }
 
         print(
-            "[BLECentral] didDiscoverServices:",
-            peripheral.identifier
+            "[BLECentral] Service count:",
+            services.count
         )
 
+        for service in services {
+            print(
+                "[BLECentral] Service UUID:",
+                service.uuid
+            )
+        }
+        
         for service in services
         where service.uuid == BLEUUID.service
         {
-            print(
-                "[BLECentral] discoverCharacteristics:",
-                peripheral.identifier
-            )
-
-            peripheral.discoverCharacteristics(
-                [BLEUUID.message],
-                for: service
-            )
+            peripheral.discoverCharacteristics([BLEUUID.message],
+                                               for: service)
         }
     }
 
