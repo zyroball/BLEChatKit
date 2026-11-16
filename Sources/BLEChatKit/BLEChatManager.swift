@@ -15,11 +15,18 @@ public final class BLEChatManager
 
     private let central: BLECentral
     private let peripheral: BLEPeripheral
+    private var centralDeviceIDs = Set<UUID>()
+    private var readyCentralDeviceIDs = Set<UUID>()
     
     public var onSendCompleted: ((_ messageID: UUID,
                                   _ deviceID: UUID) -> Void)?
+    
+    
+    public var onSendFailed: ((_ messageID: UUID?,
+                               _ deviceID: UUID,
+                               _ error: Error) -> Void)?
 
-    private var centralDeviceIDs = Set<UUID>()
+
     private var peripheralCentralIDs = Set<UUID>()
 
     private var shouldRun = false
@@ -70,31 +77,36 @@ public final class BLEChatManager
     public func send(_ message: String,
                      to deviceID: UUID) throws -> Bool
     {
-        if peripheralCentralIDs.contains(deviceID)
+        let canSendAsCentral =
+            readyCentralDeviceIDs.contains(deviceID)
+
+        let canSendAsPeripheral =
+            peripheralCentralIDs.contains(deviceID)
+
+        // 両方の送信経路が存在する場合
+        // Central側を優先する
+        if canSendAsCentral
         {
-            try peripheral.sendChunked(message,
-                                       to: deviceID)
+
+            try central.sendChunked(message, to: deviceID)
 
             return true
         }
 
-        if centralDeviceIDs.contains(deviceID)
+        // Peripheral側の通知送信
+        if canSendAsPeripheral
         {
-            try central.sendChunked(message,
-                                    to: deviceID)
-
-            return true
+            return try peripheral.send(message,to: deviceID)
         }
 
+        // 送信できる経路がない
         return false
     }
 }
 
 
-extension BLEChatManager: BLECentralDelegate {
-
-    
-
+extension BLEChatManager: BLECentralDelegate
+{
     public func centralDidFinishSending(messageID: UUID,
                                         to deviceID: UUID)
     {
@@ -104,23 +116,34 @@ extension BLEChatManager: BLECentralDelegate {
         onSendCompleted?(messageID,deviceID)
     }
 
+    
     public func centralDidUpdateState(_ state: BLECentralState)
     {
+
         isCentralReady = (state == .poweredOn)
+
+        if !isCentralReady
+        {
+            // Central側のデバイス情報をクリア
+            centralDeviceIDs.removeAll()
+            readyCentralDeviceIDs.removeAll()
+        }
 
         delegate?.chatManagerDidUpdateBluetoothState(state)
 
-        if shouldRun && isCentralReady {
+        if shouldRun && isCentralReady
+        {
             central.startScan()
         }
     }
-    
     
     public func centralDidFailToSend(messageID: UUID,
                                      to deviceID: UUID,
                                      error: Error)
     {
         print("BLE send failed:",messageID,deviceID,error)
+        
+        onSendFailed?(messageID, deviceID, error)
     }
     
     public func centralDidDiscover(
@@ -141,33 +164,53 @@ extension BLEChatManager: BLECentralDelegate {
             from: deviceID
         )
     }
+    
+    public func centralDidBecomeReady(deviceID: UUID)
+    {
+        // 通信準備が完了したデバイスを登録
+        readyCentralDeviceIDs.insert(deviceID)
 
-    public func centralDidBecomeReady(
-        deviceID: UUID
-    ) {
-        delegate?.chatManagerDidBecomeReady(
-            deviceID: deviceID
-        )
+        delegate?.chatManagerDidBecomeReady(deviceID: deviceID)
     }
+
 }
 
 
-extension BLEChatManager: BLEConnectionDelegate {
+extension BLEChatManager: BLEConnectionDelegate
+{
+    
+    public func connectionDidChangeState(deviceID: UUID,
+                                         state: BLEConnectionState)
+    {
+        switch state {
 
-    public func connectionDidChangeState(
-        deviceID: UUID,
-        state: BLEConnectionState
-    ) {
-        delegate?.chatManagerDidChangeConnectionState(
-            deviceID: deviceID,
-            state: state
-        )
+        case .disconnecting:
+            // 切断開始時点で送信を禁止
+            readyCentralDeviceIDs.remove(deviceID)
+
+        case .disconnected:
+            // 切断完了時にデバイス情報を削除
+            readyCentralDeviceIDs.remove(deviceID)
+            centralDeviceIDs.remove(deviceID)
+
+        default:
+            break
+        }
+
+        // アプリ側へ接続状態を通知
+        delegate?.chatManagerDidChangeConnectionState(deviceID: deviceID,
+                                                      state: state)
     }
+
+
 
     public func connectionDidFail(
         deviceID: UUID,
         error: Error?
     ) {
+        // 接続失敗したデバイスを送信可能一覧から削除
+        readyCentralDeviceIDs.remove(deviceID)
+
         if let error {
             delegate?.chatManagerDidFail(error)
         }
@@ -175,22 +218,32 @@ extension BLEChatManager: BLEConnectionDelegate {
 }
 
 
-extension BLEChatManager: BLEPeripheralDelegate {
+extension BLEChatManager: BLEPeripheralDelegate
+{
+    public func peripheralDidUpdateState(_ state: BLEPeripheralState)
+    {
 
-    public func peripheralDidUpdateState(
-        _ state: BLEPeripheralState
-    ) {
         isPeripheralReady = (state == .poweredOn)
 
-        if shouldRun && isPeripheralReady {
+        if !isPeripheralReady
+        {
+            // Peripheral側の購読デバイス情報をクリア
+            peripheralCentralIDs.removeAll()
+        }
+
+        if shouldRun && isPeripheralReady
+        {
             peripheral.startAdvertising()
         }
     }
+
     
     public func peripheralDidFailToSend(to centralID: UUID,
                                  error: Error)
     {
-           // 必要な場合だけ実装する
+        print("BLE peripheral send failed:", centralID, error)
+
+           onSendFailed?(nil, centralID, error)
     }
     
     public func peripheralDidSubscribe(

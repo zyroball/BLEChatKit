@@ -584,6 +584,9 @@ extension BLEPeripheral: CBPeripheralManagerDelegate
 
         // 受信途中の分割データを破棄
         messageAssembler.reset(for: centralID)
+        
+        // 購読解除をManagerへ通知
+        delegate?.peripheralDidUnsubscribe(centralID: centralID)
 
         print("BLE central unsubscribed:", centralID)
     }
