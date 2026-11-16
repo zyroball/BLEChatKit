@@ -243,8 +243,14 @@ extension BLEChatManager: BLECentralDelegate
     
     public func centralDidBecomeReady(deviceID: UUID) {
 
-        // 初めてReadyになった場合だけ通知
         let inserted = readyCentralDeviceIDs.insert(deviceID).inserted
+
+        print(
+            "[BLEChatManager] Central Ready:",
+            deviceID,
+            "inserted:",
+            inserted
+        )
 
         guard inserted else {
             return
