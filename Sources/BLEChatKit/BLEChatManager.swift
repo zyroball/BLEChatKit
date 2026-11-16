@@ -62,6 +62,10 @@ public final class BLEChatManager
         }
     }
 
+    /// BLEデバイスのスキャンと広告を停止する。
+    ///
+    /// 既存のBLE接続は切断しない。
+    /// 接続を切断する場合は disconnect(from:) を使用する。
     public func stop() {
         shouldRun = false
 
@@ -89,6 +93,12 @@ public final class BLEChatManager
         return false
     }
 
+    /// 指定したデバイスとのCentral側の接続を切断する。
+    ///
+    /// - Parameter deviceID: 切断対象のデバイスID
+    ///
+    /// 切断処理は非同期で行われる。
+    /// 実際の状態変更はDelegateで通知される。
     public func disconnect(from deviceID: UUID) {
         central.disconnect(from: deviceID)
     }
@@ -153,10 +163,22 @@ extension BLEChatManager: BLECentralDelegate
             centralDeviceIDs.removeAll()
             readyCentralDeviceIDs.removeAll()
 
-            // Central側の接続状態をリセット
-            for deviceID in connectionStates.keys
+            // 接続中だったデバイスを切断状態へ変更
+            for deviceID in Array(connectionStates.keys)
             {
+
+                guard connectionStates[deviceID] != .disconnected
+                else {
+                    continue
+                }
+
                 connectionStates[deviceID] = .disconnected
+
+                // アプリ側へ切断を通知
+                delegate?.chatManagerDidChangeConnectionState(
+                    deviceID: deviceID,
+                    state: .disconnected
+                )
             }
         }
 
