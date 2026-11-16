@@ -622,6 +622,15 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate
                            didUpdateValueFor characteristic: CBCharacteristic,
                            error: Error?)
     {
+        print(
+            "[BLECentral] didUpdateValueFor:",
+            characteristic.uuid,
+            "bytes:",
+            characteristic.value?.count ?? 0,
+            "error:",
+            String(describing: error)
+        )
+        
         guard error == nil,
               characteristic.uuid == BLEUUID.message,
               let data = characteristic.value
