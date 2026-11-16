@@ -418,6 +418,12 @@ extension BLECentral: @preconcurrency CBCentralManagerDelegate
         )
 
         // サービス探索を開始
+        print(
+            "[BLECentral] discoverServices:",
+            deviceID
+        )
+        
+        // サービス探索を開始
         peripheral.discoverServices([
             BLEUUID.service
         ])
