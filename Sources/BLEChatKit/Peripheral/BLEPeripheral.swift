@@ -25,6 +25,7 @@ public final class BLEPeripheral: NSObject
     // 1デバイスあたりの送信待ちデータ上限：2MB
     private let maxNotificationQueueBytes = 2_097_152
 
+    private var serviceRegistrationInProgress = false
     private var serviceReady = false
     private var advertisingRequested = false
 
@@ -64,21 +65,28 @@ public final class BLEPeripheral: NSObject
         peripheralManager.stopAdvertising()
     }
 
-    private func setupService()
-    {
-        guard peripheralManager.state == .poweredOn
-        else
-        {
+    private func setupService() {
+
+        guard peripheralManager.state == .poweredOn,
+              !serviceReady,
+              !serviceRegistrationInProgress
+        else {
             return
         }
 
-        let characteristic = CBMutableCharacteristic(type: BLEUUID.message,
-                                                     properties: [.write, .notify],
-                                                     value: nil,
-                                                     permissions: [.writeable])
+        serviceRegistrationInProgress = true
 
-        let service = CBMutableService(type: BLEUUID.service,
-                                       primary: true)
+        let characteristic = CBMutableCharacteristic(
+            type: BLEUUID.message,
+            properties: [.write, .notify],
+            value: nil,
+            permissions: [.writeable]
+        )
+
+        let service = CBMutableService(
+            type: BLEUUID.service,
+            primary: true
+        )
 
         service.characteristics = [characteristic]
 
@@ -408,8 +416,8 @@ extension BLEPeripheral: @preconcurrency CBPeripheralManagerDelegate
         else
         {
             serviceReady = false
+            serviceRegistrationInProgress = false
             messageCharacteristic = nil
-
             // Bluetoothが使用できない場合は通信状態を破棄
             cleanupAllConnections()
         }
@@ -504,23 +512,26 @@ extension BLEPeripheral: @preconcurrency CBPeripheralManagerDelegate
                                   didAdd service: CBService,
                                   error: Error?)
     {
-        if let error
-        {
+        guard service.uuid == BLEUUID.service else {
+            return
+        }
+
+        serviceRegistrationInProgress = false
+
+        if let error {
             serviceReady = false
+
             delegate?.peripheralDidFailToAdvertise(
                 error: error
             )
             return
         }
 
-        guard service.uuid == BLEUUID.service
-        else
-        {
-            return
-        }
-
         serviceReady = true
-        advertise()
+
+        if advertisingRequested {
+            advertise()
+        }
     }
 
     public func peripheralManagerDidStartAdvertising(_ peripheral: CBPeripheralManager,
