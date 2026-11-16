@@ -6,7 +6,7 @@ let package = Package(
     name: "BLEChatKit",
 
     platforms: [
-        .iOS(.v15),
+        .iOS(.v14),
         .macOS(.v12)
     ],
 
