@@ -113,12 +113,15 @@ public final class BLEMessageAssembler
         // 同じチャンクを再受信した場合のサイズも考慮
         let previousSize = buffer.chunks[packet.chunkIndex]?.count ?? 0
 
-        let currentMessageSize = buffer.chunks.values.reduce(0)
-        {
+        let currentMessageSize = buffer.chunks.values.reduce(0) {
             $0 + $1.count
         }
 
-        let newMessageSize = currentMessageSize - previousSize + packet.payload.count
+        let newMessageSize =
+            currentMessageSize + packet.payload.count
+
+        let newTotalSize =
+            currentBufferSize() + packet.payload.count
 
         // 1メッセージの上限を確認
         guard newMessageSize <= maxMessageSize
@@ -127,9 +130,6 @@ public final class BLEMessageAssembler
             buffers.removeValue(forKey: key)
             return nil
         }
-
-        // 全受信バッファの上限を確認
-        let newTotalSize = currentBufferSize() - previousSize + packet.payload.count
 
         guard newTotalSize <= maxTotalBufferSize
         else

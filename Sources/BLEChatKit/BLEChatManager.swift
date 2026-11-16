@@ -18,6 +18,7 @@ public final class BLEChatManager
     private let peripheral: BLEPeripheral
     private var centralDeviceIDs = Set<UUID>()
     private var readyCentralDeviceIDs = Set<UUID>()
+    private var connectionStates: [UUID: BLEConnectionState] = [:]
     
     public var onSendCompleted: ((_ messageID: UUID,
                                   _ deviceID: UUID) -> Void)?
@@ -29,6 +30,11 @@ public final class BLEChatManager
 
 
     private var peripheralCentralIDs = Set<UUID>()
+    
+    /// 現在、通信準備が完了しているデバイスID
+    public var readyDeviceIDs: Set<UUID> {
+        readyCentralDeviceIDs.union(peripheralCentralIDs)
+    }
 
     private var shouldRun = false
     private var isCentralReady = false
@@ -66,6 +72,22 @@ public final class BLEChatManager
     public func connect(to deviceID: UUID) {
         central.connect(to: deviceID)
     }
+    
+    /// 指定したデバイスが送信可能か判定する
+    public func isReady(for deviceID: UUID) -> Bool
+    {
+        // Central側で通信準備が完了している
+        if readyCentralDeviceIDs.contains(deviceID) {
+            return true
+        }
+
+        // Peripheral側で通知購読されている
+        if peripheralCentralIDs.contains(deviceID) {
+            return true
+        }
+
+        return false
+    }
 
     public func disconnect(from deviceID: UUID) {
         central.disconnect(from: deviceID)
@@ -100,6 +122,11 @@ public final class BLEChatManager
 
         // 送信できる経路がない
         return false
+    }
+    
+    public func connectionState(for deviceID: UUID) -> BLEConnectionState
+    {
+        connectionStates[deviceID] ?? .disconnected
     }
 }
 
@@ -181,6 +208,7 @@ extension BLEChatManager: BLEConnectionDelegate
     public func connectionDidChangeState(deviceID: UUID,
                                          state: BLEConnectionState)
     {
+        connectionStates[deviceID] = state
         switch state {
 
         case .disconnecting:
