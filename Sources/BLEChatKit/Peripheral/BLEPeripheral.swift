@@ -9,6 +9,7 @@
 import Foundation
 import CoreBluetooth
 
+@MainActor
 public final class BLEPeripheral: NSObject
 {
     private let messageAssembler = BLEMessageAssembler()
@@ -366,7 +367,7 @@ public final class BLEPeripheral: NSObject
 
 // MARK: - CBPeripheralManagerDelegate
 
-extension BLEPeripheral: CBPeripheralManagerDelegate
+extension BLEPeripheral: @preconcurrency CBPeripheralManagerDelegate
 {
     public func peripheralManagerDidUpdateState(_ peripheral: CBPeripheralManager)
     {

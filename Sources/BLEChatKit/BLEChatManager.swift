@@ -8,6 +8,7 @@
 
 import Foundation
 
+@MainActor
 public final class BLEChatManager
 {
 
@@ -42,17 +43,15 @@ public final class BLEChatManager
         peripheral.delegate = self
     }
 
-    public func start()
-    {
+    public func start() {
+
         shouldRun = true
 
-        if isCentralReady
-        {
+        if isCentralReady {
             central.startScan()
         }
 
-        if isPeripheralReady
-        {
+        if isPeripheralReady {
             peripheral.startAdvertising()
         }
     }

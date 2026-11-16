@@ -18,6 +18,7 @@ public enum BLEPeripheralState: Equatable
     case poweredOn
 }
 
+@MainActor
 public protocol BLEPeripheralDelegate: AnyObject
 {
     func peripheralDidUpdateState(_ state: BLEPeripheralState)

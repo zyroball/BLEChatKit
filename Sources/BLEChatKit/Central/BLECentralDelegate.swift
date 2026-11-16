@@ -8,6 +8,7 @@
 
 import Foundation
 
+@MainActor
 public protocol BLECentralDelegate: AnyObject
 {
     func centralDidUpdateState(_ state: BLECentralState)

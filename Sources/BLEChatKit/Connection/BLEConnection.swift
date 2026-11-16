@@ -9,12 +9,14 @@
 import Foundation
 import CoreBluetooth
 
+@MainActor
 public protocol BLEConnectionDelegate: AnyObject
 {
     func connectionDidChangeState(deviceID: UUID, state: BLEConnectionState)
     func connectionDidFail(deviceID: UUID, error: Error?)
 }
 
+@MainActor
 public final class BLEConnection
 {
     public weak var delegate: BLEConnectionDelegate?

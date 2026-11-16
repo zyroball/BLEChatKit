@@ -9,6 +9,7 @@
 import Foundation
 import CoreBluetooth
 
+@MainActor
 public final class BLECentral: NSObject
 {
     private let messageAssembler = BLEMessageAssembler()
@@ -219,8 +220,6 @@ public final class BLECentral: NSObject
         // 送信中でなければ送信開始
         sendNextPacket(to: deviceID)
     }
-
-    
     
     private func cleanupConnection(for deviceID: UUID)
     {
@@ -277,12 +276,6 @@ public final class BLECentral: NSObject
             return
         }
         
-        guard let messageID =
-            self.packetQueues[deviceID]?.first?.messageID
-        else {
-            return
-        }
-
         // 書き込み中として登録
         writingDevices.insert(deviceID)
 
@@ -300,8 +293,6 @@ public final class BLECentral: NSObject
         writeTimeoutTasks[deviceID]?.cancel()
         writeTimeoutTasks.removeValue(forKey: deviceID)
     }
-    
-    
     
     private func startWriteTimeout(for deviceID: UUID) {
 
@@ -323,18 +314,27 @@ public final class BLECentral: NSObject
             // 切断処理中にする
             self.disconnectingDevices.insert(deviceID)
 
-            let error = NSError(domain: "BLEChatKit",
-                                code: 1001,
-                                userInfo: [NSLocalizedDescriptionKey:"BLE write operation timed out."]
+            let error = NSError(
+                domain: "BLEChatKit",
+                code: 1001,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "BLE write operation timed out."
+                ]
             )
 
             // キュー内の全メッセージに失敗通知
-            self.failPendingMessages(for: deviceID,
-                                     error: error)
+            self.failPendingMessages(
+                for: deviceID,
+                error: error
+            )
+
+            // cleanupConnectionで削除される場合に備えて再登録
+            self.disconnectingDevices.insert(deviceID)
+
             // BLE接続を切断
             if let peripheral = self.discoveredPeripherals[deviceID],
-               peripheral.state != .disconnected
-            {
+               peripheral.state != .disconnected {
 
                 self.centralManager.cancelPeripheralConnection(
                     peripheral
@@ -351,7 +351,7 @@ public final class BLECentral: NSObject
 
 // MARK: - CBCentralManagerDelegate
 
-extension BLECentral: CBCentralManagerDelegate
+extension BLECentral: @preconcurrency CBCentralManagerDelegate
 {
 
     public func centralManagerDidUpdateState(_ central: CBCentralManager)
@@ -462,7 +462,7 @@ extension BLECentral: CBCentralManagerDelegate
 
 
 
-extension BLECentral: CBPeripheralDelegate
+extension BLECentral: @preconcurrency CBPeripheralDelegate
 {
 
     public func peripheral(_ peripheral: CBPeripheral,
