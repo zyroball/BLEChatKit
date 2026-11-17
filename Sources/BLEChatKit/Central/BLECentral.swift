@@ -526,6 +526,23 @@ extension BLECentral: @preconcurrency CBCentralManagerDelegate
 extension BLECentral: @preconcurrency CBPeripheralDelegate
 {
 
+    public func peripheral(
+        _ peripheral: CBPeripheral,
+        didModifyServices invalidatedServices: [CBService]
+    ) {
+        print(
+            "[BLECentral] Services modified:",
+            peripheral.identifier
+        )
+
+        for service in invalidatedServices {
+            print(
+                "[BLECentral] Invalidated service:",
+                service.uuid
+            )
+        }
+    }
+    
     public func peripheral(_ peripheral: CBPeripheral,
                            didWriteValueFor characteristic: CBCharacteristic,
                            error: Error?)
