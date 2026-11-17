@@ -245,10 +245,14 @@ public final class BLEPeripheral: NSObject
             }
         }
 
-        if notificationQueues[centralID]?.isEmpty != false
-        {
+        if notificationQueues[centralID]?.isEmpty != false {
 
             cancelNotificationTimeout(for: centralID)
+
+            print(
+                "[BLEPeripheral] Notification queue drained:",
+                centralID
+            )
 
         }
         else if notificationTimeoutTasks[centralID] == nil
