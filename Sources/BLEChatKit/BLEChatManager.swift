@@ -345,15 +345,17 @@ extension BLEChatManager: BLEPeripheralDelegate
     }
 
     public func peripheralDidStartAdvertising() {
-        // 必要なら広告開始イベントを公開する
+        print("[BLEChatKit] Advertising started")
     }
 
     public func peripheralDidFailToAdvertise(
         error: Error
     ) {
+        print("[BLEChatKit] Advertising failed:", error)
+
         delegate?.chatManagerDidFail(error)
     }
-
+    
     public func peripheralDidReceiveMessage(
         _ message: String,
         from centralID: UUID
