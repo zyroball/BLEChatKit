@@ -16,6 +16,10 @@ public final class BLECentral: NSObject
     public weak var delegate: BLECentralDelegate?
     private var centralManager: CBCentralManager!
     private var discoveredPeripherals:[UUID: CBPeripheral] = [:]
+    // サービス探索中のデバイス
+    private var discoveringServiceDevices = Set<UUID>()
+    // 探索中に追加のサービス変更が発生したデバイス
+    private var pendingServiceRediscoveryDevices = Set<UUID>()
     // 切断処理中のデバイス
     private var disconnectingDevices: Set<UUID> = []
     public let connection = BLEConnection()
@@ -242,9 +246,12 @@ public final class BLECentral: NSObject
     
     private func cleanupConnection(for deviceID: UUID)
     {
+        // サービス探索状態をクリア
+        discoveringServiceDevices.remove(deviceID)
+        // 予約された再探索もクリア
+        pendingServiceRediscoveryDevices.remove(deviceID)
         // 送信待ちパケットを破棄
         outgoingPacketQueue.clear(for: deviceID)
-
         // 書き込み中の状態を解除
         writingDevices.remove(deviceID)
         
@@ -427,17 +434,23 @@ extension BLECentral: @preconcurrency CBCentralManagerDelegate
             to: .connected
         )
 
+        // サービス探索状態を初期化
+        discoveringServiceDevices.remove(deviceID)
+        pendingServiceRediscoveryDevices.remove(deviceID)
+
+        // サービス探索中として登録
+        discoveringServiceDevices.insert(deviceID)
+
         // サービス探索を開始
         print(
             "[BLECentral] discoverServices:",
             deviceID
         )
-        
-        // サービス探索を開始
+
         peripheral.discoverServices([
             BLEUUID.service
         ])
-
+        
         print("BLE connected:", deviceID)
     }
 
@@ -460,6 +473,10 @@ extension BLECentral: @preconcurrency CBCentralManagerDelegate
         let deviceID = peripheral.identifier
 
         disconnectingDevices.remove(deviceID)
+
+        // サービス探索状態をクリア
+        discoveringServiceDevices.remove(deviceID)
+        pendingServiceRediscoveryDevices.remove(deviceID)
 
         // Characteristicを削除
         messageCharacteristics.removeValue(forKey: deviceID)
@@ -542,13 +559,30 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate
             )
         }
 
+        let deviceID = peripheral.identifier
+
         delegate?.centralDidInvalidateService(
-            deviceID: peripheral.identifier
+            deviceID: deviceID
         )
+
+        // すでにサービス探索中なら、再探索を予約する
+        guard !discoveringServiceDevices.contains(deviceID)
+        else {
+            pendingServiceRediscoveryDevices.insert(deviceID)
+
+            print(
+                "[BLECentral] Rediscovery pending:",
+                deviceID
+            )
+            return
+        }
+
+        // サービス探索中として登録
+        discoveringServiceDevices.insert(deviceID)
 
         print(
             "[BLECentral] Rediscovering services:",
-            peripheral.identifier
+            deviceID
         )
 
         peripheral.discoverServices([BLEUUID.service])
@@ -645,9 +679,36 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate
     public func peripheral(_ peripheral: CBPeripheral,
                            didDiscoverServices error: Error?)
     {
+        let deviceID = peripheral.identifier
+
+        // サービス探索完了
+        discoveringServiceDevices.remove(deviceID)
+
+        // 探索中にサービス変更が発生していた場合
+        if pendingServiceRediscoveryDevices.remove(deviceID) != nil {
+
+            // 再探索中として登録
+            discoveringServiceDevices.insert(deviceID)
+
+            print(
+                "[BLECentral] Executing pending rediscovery:",
+                deviceID
+            )
+
+            peripheral.discoverServices([
+                BLEUUID.service
+            ])
+
+            return
+        }
+
         guard error == nil,
               let services = peripheral.services
         else {
+            print(
+                "[BLECentral] Service discovery failed:",
+                String(describing: error)
+            )
             return
         }
 
