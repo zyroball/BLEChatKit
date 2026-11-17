@@ -93,6 +93,7 @@ public final class BLEPeripheral: NSObject
         messageCharacteristic = characteristic
         serviceReady = false
 
+        print("[BLEPeripheral] Registering service:", service.uuid)
         peripheralManager.add(service)
     }
 
