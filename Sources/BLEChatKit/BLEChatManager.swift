@@ -360,6 +360,8 @@ extension BLEChatManager: BLEPeripheralDelegate
 
     public func peripheralDidUnsubscribe(centralID: UUID)
     {
+        print("[BLEChatManager] Unsubscribe callback:", centralID)
+
         let removed = peripheralCentralIDs.remove(centralID)
 
         guard removed != nil else {
