@@ -254,6 +254,9 @@ public final class BLEPeripheral: NSObject
                 centralID
             )
 
+            delegate?.peripheralDidFinishEnqueuing(
+                to: centralID
+            )
         }
         else if notificationTimeoutTasks[centralID] == nil
         {

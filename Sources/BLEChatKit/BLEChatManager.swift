@@ -424,4 +424,13 @@ extension BLEChatManager: BLEPeripheralDelegate
             from: centralID
         )
     }
+    
+    public func peripheralDidFinishEnqueuing(
+        to centralID: UUID
+    ) {
+        print(
+            "[BLEChatManager] Peripheral enqueue completed:",
+            centralID
+        )
+    }
 }
