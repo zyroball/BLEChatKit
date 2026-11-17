@@ -24,6 +24,7 @@ public final class BLEMessageAssembler
     private let maxTotalBufferSize = 10_485_760
     
     private let maxPendingMessages = 100
+    private let maxChunksPerMessage = 10_000
     private let maxCompletedMessages = 1_000
     
     private let timeout: TimeInterval = 30
@@ -75,6 +76,7 @@ public final class BLEMessageAssembler
         removeExpiredMessagesLocked()
 
         guard packet.totalChunks > 0,
+              packet.totalChunks <= maxChunksPerMessage,
               packet.chunkIndex >= 0,
               packet.chunkIndex < packet.totalChunks
         else {
