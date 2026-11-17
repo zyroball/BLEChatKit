@@ -18,6 +18,7 @@ public final class BLECentral: NSObject
     private var discoveredPeripherals:[UUID: CBPeripheral] = [:]
     // 通知購読の設定処理中
     private var subscribingNotificationDevices = Set<UUID>()
+    private var subscribingCharacteristics: [UUID: CBCharacteristic] = [:]
     // サービス探索中のデバイス
     private var discoveringServiceDevices = Set<UUID>()
     // 探索中に追加のサービス変更が発生したデバイス
@@ -212,15 +213,12 @@ public func debugEnableNotification(for deviceID: UUID) {
 
     subscribingNotificationDevices.insert(deviceID)
 
-    print(
-        "[BLECentral] Debug enabling notification:",
-        deviceID
-    )
+    // 購読要求中のCharacteristicを記録
+    subscribingCharacteristics[deviceID] = characteristic
 
-    peripheral.setNotifyValue(
-        true,
-        for: characteristic
-    )
+    print("[BLECentral] Debug enabling notification:", deviceID)
+
+    peripheral.setNotifyValue(true, for: characteristic)
 }
 #endif
     
@@ -306,24 +304,22 @@ public func debugEnableNotification(for deviceID: UUID) {
         sendNextPacket(to: deviceID)
     }
     
-    private func cleanupConnection(for deviceID: UUID)
-    {
-        // サービス探索状態をクリア
-        discoveringServiceDevices.remove(deviceID)
-        // 予約された再探索もクリア
-        pendingServiceRediscoveryDevices.remove(deviceID)
-        // 送信待ちパケットを破棄
-        outgoingPacketQueue.clear(for: deviceID)
-        // 書き込み中の状態を解除
-        writingDevices.remove(deviceID)
-        
-        messageAssembler.reset(for: deviceID)
-        
-        retryCounts.removeValue(forKey: deviceID)
-        
-        cancelWriteTimeout(for: deviceID)
+    private func cleanupConnection(for deviceID: UUID) {
 
-        print("BLE connection cleaned:", deviceID)
+        // Characteristicの情報を削除
+        messageCharacteristics.removeValue(forKey: deviceID)
+
+        // 通知購読中の状態を解除
+        subscribingNotificationDevices.remove(deviceID)
+
+        // 購読要求中のCharacteristicを削除
+        subscribingCharacteristics.removeValue(forKey: deviceID)
+
+        // サービス探索状態を解除
+        discoveringServiceDevices.remove(deviceID)
+
+        // 再探索待ち状態を解除
+        pendingServiceRediscoveryDevices.remove(deviceID)
     }
     
     private func failPendingMessages(for deviceID: UUID,
@@ -638,6 +634,8 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate
 
         // 通知購読中の状態を解除
         subscribingNotificationDevices.remove(deviceID)
+        
+        subscribingCharacteristics.removeValue(forKey: deviceID)
 
         print(
             "[BLECentral] Notification state cleared:",
@@ -818,48 +816,81 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate
         }
     }
 
-    public func peripheral(_ peripheral: CBPeripheral,
-                           didDiscoverCharacteristicsFor service: CBService,
-                           error: Error?)
-    {
+    public func peripheral(
+        _ peripheral: CBPeripheral,
+        didDiscoverCharacteristicsFor service: CBService,
+        error: Error?
+    ) {
         guard error == nil,
               let characteristics = service.characteristics
         else {
             return
         }
 
-        for characteristic in characteristics
-        where characteristic.uuid == BLEUUID.message
-        {
-            let deviceID = peripheral.identifier
+        let deviceID = peripheral.identifier
 
+        for characteristic in characteristics
+        where characteristic.uuid == BLEUUID.message {
+
+            // 現在のCharacteristicを記録
             messageCharacteristics[deviceID] = characteristic
 
-            // 通知購読の設定処理中なら重複要求しない
-            guard !subscribingNotificationDevices.contains(deviceID)
-            else {
-                print(
-                    "[BLECentral] Notification subscription pending:",
-                    deviceID
-                )
-                continue
+            // 通知購読中のCharacteristicを確認
+            if subscribingNotificationDevices.contains(deviceID) {
+
+                if let subscribingCharacteristic =
+                    subscribingCharacteristics[deviceID] {
+
+                    // 同じCharacteristicなら重複購読しない
+                    if subscribingCharacteristic === characteristic {
+
+                        print(
+                            "[BLECentral] Notification subscription pending:",
+                            deviceID
+                        )
+
+                        continue
+                    }
+
+                    // 別のCharacteristicに変更された
+                    print(
+                        "[BLECentral] Characteristic changed while subscribing:",
+                        deviceID
+                    )
+
+                } else {
+
+                    print(
+                        "[BLECentral] Subscription state inconsistent:",
+                        deviceID
+                    )
+                }
+
+                // 古い購読待機状態を解除
+                subscribingCharacteristics.removeValue(forKey: deviceID)
+                subscribingNotificationDevices.remove(deviceID)
             }
 
             // すでに通知購読済みなら再要求しない
-            guard !characteristic.isNotifying
-            else {
+            guard !characteristic.isNotifying else {
+
                 print(
                     "[BLECentral] Already notifying:",
                     deviceID
                 )
+
                 continue
             }
 
             // 通知購読処理中として登録
             subscribingNotificationDevices.insert(deviceID)
 
+            // 購読対象のCharacteristicを記録
+            subscribingCharacteristics[deviceID] = characteristic
+
             print("[BLECentral] setNotifyValue:", deviceID)
 
+            // 通知購読開始
             peripheral.setNotifyValue(
                 true,
                 for: characteristic
@@ -874,17 +905,16 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate
         error: Error?
     ) {
         let deviceID = peripheral.identifier
-
+        
         print("[BLECentral] Notification state updated:", deviceID)
         print("[BLECentral] Characteristic UUID:", characteristic.uuid)
         print("[BLECentral] Is notifying:", characteristic.isNotifying)
-
+        
         // 対象Characteristic以外は処理しない
         guard characteristic.uuid == BLEUUID.message else {
             return
         }
-
-        // 現在管理しているCharacteristicと同じインスタンスか確認
+        
         guard let currentCharacteristic = messageCharacteristics[deviceID],
               currentCharacteristic === characteristic
         else {
@@ -892,43 +922,78 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate
                 "[BLECentral] Ignoring stale notification callback:",
                 deviceID
             )
+            
+            if let subscribingCharacteristic = subscribingCharacteristics[deviceID],
+               subscribingCharacteristic === characteristic {
+                
+                subscribingCharacteristics.removeValue(forKey: deviceID)
+                subscribingNotificationDevices.remove(deviceID)
+                
+                // 新しいCharacteristicが存在する場合は購読を開始
+                if let currentCharacteristic = messageCharacteristics[deviceID],
+                   !currentCharacteristic.isNotifying,
+                   peripheral.state == .connected {
+                    
+                    subscribingNotificationDevices.insert(deviceID)
+                    
+                    subscribingCharacteristics[deviceID] = currentCharacteristic
+                    
+                    print(
+                        "[BLECentral] Resubscribing to current characteristic:",
+                        deviceID
+                    )
+                    
+                    peripheral.setNotifyValue(
+                        true,
+                        for: currentCharacteristic
+                    )
+                }
+            }
+            
             return
         }
+        
+        // 現在のCharacteristicの購読完了
+        // 購読待機中のCharacteristicと一致する場合だけ解除
+        if let subscribingCharacteristic = subscribingCharacteristics[deviceID],
+           subscribingCharacteristic === characteristic {
 
-        // 現在のCharacteristicに対する購読処理が完了
-        subscribingNotificationDevices.remove(deviceID)
+            subscribingCharacteristics.removeValue(forKey: deviceID)
+            subscribingNotificationDevices.remove(deviceID)
+        }
 
         if let error {
             print(
                 "[BLECentral] Notification error:",
                 error
             )
-
+            
             // 通知購読状態を確認
             if !characteristic.isNotifying {
                 delegate?.centralDidBecomeNotReady(
                     deviceID: deviceID
                 )
             }
-
+            
             return
         }
-
+        
         guard characteristic.isNotifying else {
-
+            
             print(
                 "[BLECentral] Notification disabled:",
                 deviceID
             )
-
+            
             delegate?.centralDidBecomeNotReady(
                 deviceID: deviceID
             )
-
+            
             return
         }
-
-        delegate?.centralDidBecomeReady(deviceID: deviceID)    }
+        
+        delegate?.centralDidBecomeReady(deviceID: deviceID)
+    }
     
     public func peripheral(_ peripheral: CBPeripheral,
                            didUpdateValueFor characteristic: CBCharacteristic,
