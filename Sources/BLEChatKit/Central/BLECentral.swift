@@ -227,6 +227,11 @@ private var debugDisconnectAfterFirstChunk = false
             packets.count
         )
 
+#if DEBUG
+debugDisconnectAfterFirstChunk = true
+print("[DEBUG] Mid-transfer disconnect test enabled")
+#endif
+
         // 各パケットに最終チャンク情報を付与
         let outgoingPackets = try packets.enumerated().map { index, packet in
             BLEOutgoingPacketQueue.OutgoingPacket(
@@ -606,6 +611,23 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate
 
         // 書き込み状態を解除
         writingDevices.remove(deviceID)
+        
+#if DEBUG
+if debugDisconnectAfterFirstChunk,
+   outgoingPacketQueue.count(for: deviceID) > 0 {
+
+    print("[DEBUG] Disconnecting during chunked send")
+    print(
+        "[DEBUG] Remaining packets:",
+        outgoingPacketQueue.count(for: deviceID)
+    )
+
+    debugDisconnectAfterFirstChunk = false
+
+    disconnect(from: deviceID)
+    return
+}
+#endif
 
         // メッセージの最終チャンクなら通知
         if packet.isLastChunk
