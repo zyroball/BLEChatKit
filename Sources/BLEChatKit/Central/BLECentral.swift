@@ -190,6 +190,40 @@ public func debugDisableNotification(for deviceID: UUID) {
 }
 #endif
     
+#if DEBUG
+public func debugEnableNotification(for deviceID: UUID) {
+
+    guard let peripheral = discoveredPeripherals[deviceID],
+          connection.state(for: deviceID) == .connected,
+          let characteristic = messageCharacteristics[deviceID]
+    else {
+        print(
+            "[BLECentral] Debug enable notification skipped:",
+            deviceID
+        )
+        return
+    }
+
+    guard !characteristic.isNotifying,
+          !subscribingNotificationDevices.contains(deviceID)
+    else {
+        return
+    }
+
+    subscribingNotificationDevices.insert(deviceID)
+
+    print(
+        "[BLECentral] Debug enabling notification:",
+        deviceID
+    )
+
+    peripheral.setNotifyValue(
+        true,
+        for: characteristic
+    )
+}
+#endif
+    
     
     public func preparePackets(_ message: String,
                                to deviceID: UUID) throws -> [BLEMessagePacket]

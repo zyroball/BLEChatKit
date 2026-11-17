@@ -157,6 +157,12 @@ public func debugDisableNotification(for deviceID: UUID) {
 }
 #endif
     
+#if DEBUG
+public func debugEnableNotification(for deviceID: UUID) {
+    central.debugEnableNotification(for: deviceID)
+}
+#endif
+    
 }
 
 
