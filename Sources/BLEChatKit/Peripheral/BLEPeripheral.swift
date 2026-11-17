@@ -596,21 +596,7 @@ extension BLEPeripheral: @preconcurrency CBPeripheralManagerDelegate
         // 送信中フラグを解除
         sendingCentrals.remove(centralID)
 
-#if DEBUG
-print(
-    "[BLEPeripheral] Pending before reset:",
-    messageAssembler.debugPendingMessageCount(for: centralID)
-)
-#endif
-
-messageAssembler.reset(for: centralID)
-
-#if DEBUG
-print(
-    "[BLEPeripheral] Pending after reset:",
-    messageAssembler.debugPendingMessageCount(for: centralID)
-)
-#endif
+        messageAssembler.reset(for: centralID)
 
         print("[BLEPeripheral] Message assembler reset:", centralID)
         
