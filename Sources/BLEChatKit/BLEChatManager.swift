@@ -281,6 +281,29 @@ extension BLEChatManager: BLECentralDelegate
 
         delegate?.chatManagerDidBecomeReady(deviceID: deviceID)
     }
+    
+    public func centralDidBecomeNotReady(deviceID: UUID) {
+
+        let removed = readyCentralDeviceIDs.remove(deviceID)
+
+        guard removed != nil else {
+            return
+        }
+
+        print(
+            "[BLEChatManager] Central NotReady:",
+            deviceID
+        )
+
+        // Peripheral側でもReadyならNotReadyにはしない
+        guard !isReady(for: deviceID) else {
+            return
+        }
+
+        delegate?.chatManagerDidBecomeNotReady(
+            deviceID: deviceID
+        )
+    }
 }
 
 

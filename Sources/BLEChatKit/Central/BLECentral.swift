@@ -839,16 +839,36 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate
         subscribingNotificationDevices.remove(deviceID)
 
         if let error {
-            print("[BLECentral] Notification error:", error)
+            print(
+                "[BLECentral] Notification error:",
+                error
+            )
+
+            // 通知購読状態を確認
+            if !characteristic.isNotifying {
+                delegate?.centralDidBecomeNotReady(
+                    deviceID: deviceID
+                )
+            }
+
             return
         }
 
         guard characteristic.isNotifying else {
+
+            print(
+                "[BLECentral] Notification disabled:",
+                deviceID
+            )
+
+            delegate?.centralDidBecomeNotReady(
+                deviceID: deviceID
+            )
+
             return
         }
 
-        delegate?.centralDidBecomeReady(deviceID: deviceID)
-    }
+        delegate?.centralDidBecomeReady(deviceID: deviceID)    }
     
     public func peripheral(_ peripheral: CBPeripheral,
                            didUpdateValueFor characteristic: CBCharacteristic,
