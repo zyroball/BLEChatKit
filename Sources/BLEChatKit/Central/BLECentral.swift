@@ -28,14 +28,7 @@ public final class BLECentral: NSObject
         centralManager.isScanning
     }
     
-    private struct OutgoingPacket
-    {
-        let messageID: UUID
-        let data: Data
-        let isLastChunk: Bool
-    }
-
-    private var packetQueues: [UUID: [OutgoingPacket]] = [:]
+    private let outgoingPacketQueue = BLEOutgoingPacketQueue()
     
     private var writingDevices: Set<UUID> = []
     
@@ -207,10 +200,8 @@ public final class BLECentral: NSObject
         )
 
         // 各パケットに最終チャンク情報を付与
-        let outgoingPackets = try packets.enumerated().map {
-            index, packet in
-
-            OutgoingPacket(
+        let outgoingPackets = try packets.enumerated().map { index, packet in
+            BLEOutgoingPacketQueue.OutgoingPacket(
                 messageID: packet.messageID,
                 data: try packet.encode(),
                 isLastChunk: index == packets.count - 1
@@ -218,7 +209,8 @@ public final class BLECentral: NSObject
         }
 
         // デバイスごとの送信キューに追加
-        packetQueues[deviceID, default: []].append(contentsOf: outgoingPackets)
+        outgoingPacketQueue.enqueue(outgoingPackets,
+                                    for: deviceID)
 
         // 送信中でなければ送信開始
         sendNextPacket(to: deviceID)
@@ -227,7 +219,7 @@ public final class BLECentral: NSObject
     private func cleanupConnection(for deviceID: UUID)
     {
         // 送信待ちパケットを破棄
-        packetQueues.removeValue(forKey: deviceID)
+        outgoingPacketQueue.clear(for: deviceID)
 
         // 書き込み中の状態を解除
         writingDevices.remove(deviceID)
@@ -248,11 +240,7 @@ public final class BLECentral: NSObject
     {
 
         // 失敗対象のメッセージIDを先に確定
-        let messageIDs = Array(
-            Set(
-                packetQueues[deviceID]?.map(\.messageID) ?? []
-            )
-        )
+        let messageIDs = outgoingPacketQueue.messageIDs(for: deviceID)
 
         // 通知前に送信状態をクリア
         cleanupConnection(for: deviceID)
@@ -274,7 +262,7 @@ public final class BLECentral: NSObject
               let peripheral = discoveredPeripherals[deviceID],
               peripheral.state == .connected,
               let characteristic = messageCharacteristics[deviceID],
-              let packet = packetQueues[deviceID]?.first
+              let packet = outgoingPacketQueue.peek(for: deviceID)
         else {
             return
         }
@@ -491,7 +479,7 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate
 
         guard !disconnectingDevices.contains(deviceID),
               writingDevices.contains(deviceID),
-              let packet = packetQueues[deviceID]?.first
+              let packet = outgoingPacketQueue.peek(for: deviceID)
         else {
             return
         }
@@ -548,7 +536,7 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate
         retryCounts.removeValue(forKey: deviceID)
 
         // 送信済みチャンクをキューから削除
-        packetQueues[deviceID]?.removeFirst()
+        outgoingPacketQueue.dequeue(for: deviceID)
 
         // 書き込み状態を解除
         writingDevices.remove(deviceID)
@@ -558,11 +546,6 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate
         {
             delegate?.centralDidFinishSending(messageID: packet.messageID,
                                               to: deviceID)
-        }
-
-        // キューが空なら削除
-        if packetQueues[deviceID]?.isEmpty == true {
-            packetQueues.removeValue(forKey: deviceID)
         }
 
         // 次のチャンクを送信
