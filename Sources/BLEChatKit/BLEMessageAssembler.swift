@@ -49,7 +49,7 @@ public final class BLEMessageAssembler
         return currentBufferSize()
     }
 
-    internal var pendingMessageCount: Int
+    public var pendingMessageCount: Int
     {
         lock.lock()
         defer { lock.unlock() }
@@ -109,9 +109,6 @@ public final class BLEMessageAssembler
         {
             return nil
         }
-
-        // 同じチャンクを再受信した場合のサイズも考慮
-        let previousSize = buffer.chunks[packet.chunkIndex]?.count ?? 0
 
         let currentMessageSize = buffer.chunks.values.reduce(0) {
             $0 + $1.count
