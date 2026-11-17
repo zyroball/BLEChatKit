@@ -237,6 +237,21 @@ public final class BLEMessageAssembler
         }
     }
     
+#if DEBUG
+public func debugPendingMessageCount(
+    for deviceID: UUID
+) -> Int {
+    lock.lock()
+    defer {
+        lock.unlock()
+    }
+
+    return buffers.keys.filter {
+        $0.deviceID == deviceID
+    }.count
+}
+#endif
+    
     private func currentBufferSize() -> Int
     {
         buffers.values.reduce(0)
