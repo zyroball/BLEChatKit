@@ -446,49 +446,71 @@ extension BLECentral: @preconcurrency CBCentralManagerDelegate
 
     
 
-    public func centralManager(_ central: CBCentralManager,
-                               didDisconnectPeripheral peripheral: CBPeripheral,
-                               error: Error?)
-    {
+    public func centralManager(
+        _ central: CBCentralManager,
+        didDisconnectPeripheral peripheral: CBPeripheral,
+        error: Error?
+    ) {
         let deviceID = peripheral.identifier
-        
-        disconnectingDevices.remove(peripheral.identifier)
 
-        // メッセージCharacteristicを削除
+        disconnectingDevices.remove(deviceID)
+
+        // Characteristicを削除
         messageCharacteristics.removeValue(forKey: deviceID)
 
-        // 未完了の送信を失敗として通知
-        let disconnectError = error ?? NSError(
-            domain: "BLEChatKit",
-            code: 1002,
-            userInfo: [
-                NSLocalizedDescriptionKey:
-                    "BLE connection disconnected before sending completed."
-            ]
-        )
-        
         print("[BLECentral] Disconnected:", deviceID)
-        print("[BLECentral] Disconnect error:",
-              disconnectError.localizedDescription)
-        print("[BLECentral] Pending messages:",
-              outgoingPacketQueue.messageIDs(for: deviceID).count)
 
-        failPendingMessages(
-            for: deviceID,
-            error: disconnectError
+        // 未完了メッセージを確認
+        let pendingMessageIDs =
+            outgoingPacketQueue.messageIDs(for: deviceID)
+
+        print(
+            "[BLECentral] Pending messages:",
+            pendingMessageIDs.count
         )
+
+        // 未完了メッセージがある場合のみ失敗処理
+        if !pendingMessageIDs.isEmpty {
+
+            let disconnectError = error ?? NSError(
+                domain: "BLEChatKit",
+                code: 1002,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "BLE connection disconnected before sending completed."
+                ]
+            )
+
+            print(
+                "[BLECentral] Pending send failed:",
+                disconnectError.localizedDescription
+            )
+
+            failPendingMessages(
+                for: deviceID,
+                error: disconnectError
+            )
+        }
 
         // 接続状態を更新
-        connection.updateState(for: peripheral,
-                               to: .disconnected)
+        connection.updateState(
+            for: peripheral,
+            to: .disconnected
+        )
 
-        // エラーがある場合は通知
-        if let error
-        {
-            connection.delegate?.connectionDidFail(deviceID: deviceID,
-                                                   error: error)
+        // 実際の切断エラーがある場合のみ通知
+        if let error {
+            print(
+                "[BLECentral] Disconnect error:",
+                error.localizedDescription
+            )
+
+            connection.delegate?.connectionDidFail(
+                deviceID: deviceID,
+                error: error
+            )
         }
-        
+
         delegate?.centralDidDisconnect(deviceID: deviceID)
     }
 }
