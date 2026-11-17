@@ -118,6 +118,11 @@ public final class BLECentral: NSObject
             "[BLEChatKit] Pending packets before disconnect:",
             outgoingPacketQueue.count(for: deviceID)
         )
+        
+        print(
+            "[BLEChatKit] Pending message IDs:",
+            outgoingPacketQueue.messageIDs(for: deviceID)
+        )
 
         failPendingMessages(
             for: deviceID,
