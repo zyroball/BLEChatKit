@@ -280,12 +280,27 @@ extension BLEChatManager: BLEConnectionDelegate
         switch state {
 
         case .disconnecting:
+            let wasReady = isReady(for: deviceID)
+
             readyCentralDeviceIDs.remove(deviceID)
 
+            if wasReady && !isReady(for: deviceID) {
+                delegate?.chatManagerDidBecomeNotReady(
+                    deviceID: deviceID
+                )
+            }
+
         case .disconnected:
+            let wasReady = isReady(for: deviceID)
+
             readyCentralDeviceIDs.remove(deviceID)
             centralDeviceIDs.remove(deviceID)
 
+            if wasReady && !isReady(for: deviceID) {
+                delegate?.chatManagerDidBecomeNotReady(
+                    deviceID: deviceID
+                )
+            }
         default:
             break
         }
@@ -358,20 +373,34 @@ extension BLEChatManager: BLEPeripheralDelegate
         )
     }
 
-    public func peripheralDidUnsubscribe(centralID: UUID)
-    {
+    public func peripheralDidUnsubscribe(centralID: UUID) {
+
+        print("[BLEChatManager] Unsubscribe callback:", centralID)
+
         let removed = peripheralCentralIDs.remove(centralID)
 
         guard removed != nil else {
             return
         }
 
+        print("[BLEChatManager] Peripheral Unsubscribed:", centralID)
+
         print(
-            "[BLEChatManager] Peripheral Unsubscribed:",
-            centralID
+            "[BLEChatManager] Is ready:",
+            isReady(for: centralID)
         )
 
-        print("[BLEChatManager] Ready devices after unsubscribe:", readyDeviceIDs)
+        print(
+            "[BLEChatManager] Ready devices after unsubscribe:",
+            readyDeviceIDs
+        )
+
+        // STEP89-㉔ 追加
+        if !isReady(for: centralID) {
+            delegate?.chatManagerDidBecomeNotReady(
+                deviceID: centralID
+            )
+        }
     }
 
     public func peripheralDidStartAdvertising() {

@@ -8,8 +8,6 @@
 
 import Foundation
 
-import Foundation
-
 @MainActor
 public protocol BLEChatManagerDelegate: AnyObject
 {
@@ -22,6 +20,9 @@ public protocol BLEChatManagerDelegate: AnyObject
                                              state: BLEConnectionState)
     /// 通信準備が完了した
     func chatManagerDidBecomeReady(deviceID: UUID)
+    
+    /// 通信準備が解除された
+    func chatManagerDidBecomeNotReady(deviceID: UUID)
     /// メッセージを受信した
     func chatManagerDidReceiveMessage(_ message: String,
                                       from deviceID: UUID)
