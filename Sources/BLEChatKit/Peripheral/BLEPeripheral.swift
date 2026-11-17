@@ -25,7 +25,8 @@ public final class BLEPeripheral: NSObject
     private var messageCharacteristic: CBMutableCharacteristic?
     private var subscribedCentrals: [UUID: CBCentral] = [:]
     private var notificationTimeoutTasks: [UUID: DispatchWorkItem] = [:]
-    private let notificationTimeout: TimeInterval = 3
+    private let notificationTimeout: TimeInterval = 3.0
+    private var notificationTimeoutIDs: [UUID: UUID] = [:]
     
     // 1デバイスあたりの送信待ちデータ上限：2MB
     private let maxNotificationQueueBytes = 2_097_152
@@ -211,8 +212,6 @@ public final class BLEPeripheral: NSObject
         sendNextNotification(to: centralID,
                              characteristic: characteristic)
     }
-
-    
     
     private func sendNextNotification(to centralID: UUID,
                                       characteristic: CBMutableCharacteristic)
@@ -251,11 +250,14 @@ public final class BLEPeripheral: NSObject
 
         while let item = notificationQueues[centralID]?.first {
 
-            let success = peripheralManager.updateValue(
-                item.data,
-                for: characteristic,
-                onSubscribedCentrals: [central]
-            )
+//            let success = peripheralManager.updateValue(
+//                item.data,
+//                for: characteristic,
+//                onSubscribedCentrals: [central]
+//            )
+            
+            // STEP89-135 テスト用
+            let success = false
 
             guard success else {
                 print(
@@ -402,6 +404,7 @@ public final class BLEPeripheral: NSObject
     {
         notificationTimeoutTasks[centralID]?.cancel()
         notificationTimeoutTasks.removeValue(forKey: centralID)
+        notificationTimeoutIDs.removeValue(forKey: centralID)
     }
     
     private func startNotificationTimeout(for centralID: UUID)
@@ -412,10 +415,17 @@ public final class BLEPeripheral: NSObject
             )
         cancelNotificationTimeout(for: centralID)
 
-        let task = DispatchWorkItem { [weak self] in
+        let timeoutID = UUID()
 
+        notificationTimeoutIDs[centralID] = timeoutID
+
+        let task = DispatchWorkItem { [weak self] in
             guard let self else { return }
 
+            guard self.notificationTimeoutIDs[centralID] == timeoutID else {
+                return
+            }
+            
             // 未送信パケットが残っているか確認
             guard self.notificationQueues[centralID]?.isEmpty == false
             else {
