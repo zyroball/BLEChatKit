@@ -652,6 +652,8 @@ extension BLEPeripheral: @preconcurrency CBPeripheralManagerDelegate
 
         // 先に購読デバイスを登録
         subscribedCentrals[centralID] = central
+        
+        print("[BLEPeripheral] Notification subscribed:", centralID)
 
         // 登録完了後にアプリ側へ通知
         delegate?.peripheralDidSubscribe(centralID: centralID)
