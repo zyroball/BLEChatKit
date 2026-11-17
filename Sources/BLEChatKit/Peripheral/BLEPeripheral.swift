@@ -509,8 +509,6 @@ extension BLEPeripheral: @preconcurrency CBPeripheralManagerDelegate
             cleanupAllConnections()
         }
     }
-
-    
     
     public func peripheralManagerIsReady(toUpdateSubscribers peripheral: CBPeripheralManager)
     {

@@ -668,22 +668,44 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate
     }
     
     
-    public func peripheral(_ peripheral: CBPeripheral,
-                           didUpdateNotificationStateFor characteristic: CBCharacteristic,
-                           error: Error?)
-    {
-        guard error == nil,
-              characteristic.uuid == BLEUUID.message,
+    public func peripheral(
+        _ peripheral: CBPeripheral,
+        didUpdateNotificationStateFor characteristic: CBCharacteristic,
+        error: Error?
+    ) {
+        print(
+            "[BLECentral] Notification state updated:",
+            peripheral.identifier
+        )
+
+        print(
+            "[BLECentral] Characteristic UUID:",
+            characteristic.uuid
+        )
+
+        print(
+            "[BLECentral] Is notifying:",
+            characteristic.isNotifying
+        )
+
+        if let error {
+            print(
+                "[BLECentral] Notification error:",
+                error
+            )
+            return
+        }
+
+        guard characteristic.uuid == BLEUUID.message,
               characteristic.isNotifying
         else {
             return
         }
+
         delegate?.centralDidBecomeReady(
             deviceID: peripheral.identifier
         )
     }
-    
-    
     
     public func peripheral(_ peripheral: CBPeripheral,
                            didUpdateValueFor characteristic: CBCharacteristic,
