@@ -51,7 +51,7 @@ public final class BLEMessageAssembler
         return currentBufferSize()
     }
 
-    public var pendingMessageCount: Int
+    internal var pendingMessageCount: Int
     {
         lock.lock()
         defer { lock.unlock() }
