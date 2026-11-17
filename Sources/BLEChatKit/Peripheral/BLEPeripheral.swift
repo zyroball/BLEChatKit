@@ -25,7 +25,7 @@ public final class BLEPeripheral: NSObject
     private var messageCharacteristic: CBMutableCharacteristic?
     private var subscribedCentrals: [UUID: CBCentral] = [:]
     private var notificationTimeoutTasks: [UUID: DispatchWorkItem] = [:]
-    private let notificationTimeout: TimeInterval = 3.0
+    private let notificationTimeout: TimeInterval = 30
     private var notificationTimeoutIDs: [UUID: UUID] = [:]
     
     // 1デバイスあたりの送信待ちデータ上限：2MB
@@ -250,15 +250,12 @@ public final class BLEPeripheral: NSObject
 
         while let item = notificationQueues[centralID]?.first {
 
-//            let success = peripheralManager.updateValue(
-//                item.data,
-//                for: characteristic,
-//                onSubscribedCentrals: [central]
-//            )
+            let success = peripheralManager.updateValue(
+                item.data,
+                for: characteristic,
+                onSubscribedCentrals: [central]
+            )
             
-            // STEP89-135 テスト用
-            let success = false
-
             guard success else {
                 print(
                     "[BLEPeripheral] Backpressure detected:",
