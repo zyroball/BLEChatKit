@@ -123,7 +123,7 @@ public final class BLEChatManager
         // Central側を優先する
         if canSendAsCentral
         {
-
+            print("[BLEChatKit] Central chunked send:", deviceID)
             try central.sendChunked(message, to: deviceID)
 
             return true
