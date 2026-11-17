@@ -541,6 +541,19 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate
                 service.uuid
             )
         }
+
+        guard invalidatedServices.contains(where: {
+            $0.uuid == BLEUUID.service
+        }) else {
+            return
+        }
+
+        print(
+            "[BLECentral] Rediscovering services:",
+            peripheral.identifier
+        )
+
+        peripheral.discoverServices([BLEUUID.service])
     }
     
     public func peripheral(_ peripheral: CBPeripheral,
