@@ -167,6 +167,28 @@ extension BLEChatManager: BLECentralDelegate
         // connectionDidChangeState に一本化する
     }
     
+    public func centralDidInvalidateService(deviceID: UUID) {
+
+        // Central側のReady状態だけ解除
+        let removed = readyCentralDeviceIDs.remove(deviceID)
+
+        guard removed != nil else {
+            return
+        }
+
+        print(
+            "[BLEChatManager] Central service invalidated:",
+            deviceID
+        )
+
+        // Peripheral側もReadyなら、全体のReadyは維持
+        if !isReady(for: deviceID) {
+            delegate?.chatManagerDidBecomeNotReady(
+                deviceID: deviceID
+            )
+        }
+    }
+    
     public func centralDidFinishSending(messageID: UUID,
                                         to deviceID: UUID)
     {

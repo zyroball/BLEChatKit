@@ -542,11 +542,9 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate
             )
         }
 
-        guard invalidatedServices.contains(where: {
-            $0.uuid == BLEUUID.service
-        }) else {
-            return
-        }
+        delegate?.centralDidInvalidateService(
+            deviceID: peripheral.identifier
+        )
 
         print(
             "[BLECentral] Rediscovering services:",
