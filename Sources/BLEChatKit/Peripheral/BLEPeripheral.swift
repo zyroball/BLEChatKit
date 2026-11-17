@@ -503,6 +503,10 @@ extension BLEPeripheral: @preconcurrency CBPeripheralManagerDelegate
         {
             return
         }
+        
+        print(
+            "[BLEPeripheral] Ready to resume notifications"
+        )
 
         // 未送信パケットが残っているCentralへ送信再開
         for centralID in Array(notificationQueues.keys)
