@@ -213,12 +213,16 @@ extension BLEChatManager: BLECentralDelegate
         }
     }
     
-    public func centralDidFailToSend(messageID: UUID,
-                                     to deviceID: UUID,
-                                     error: Error)
-    {
-        print("BLE send failed:",messageID,deviceID,error)
-        
+    public func centralDidFailToSend(
+        messageID: UUID,
+        to deviceID: UUID,
+        error: Error
+    ) {
+        print("[BLEChatKit] Send failed")
+        print("[BLEChatKit] Message ID:", messageID)
+        print("[BLEChatKit] Device ID:", deviceID)
+        print("[BLEChatKit] Error:", error.localizedDescription)
+
         onSendFailed?(messageID, deviceID, error)
     }
     

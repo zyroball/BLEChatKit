@@ -104,9 +104,20 @@ public final class BLECentral: NSObject
         // 切断処理中として登録
         disconnectingDevices.insert(deviceID)
 
-        // 送受信状態をクリア
-        cleanupConnection(for: deviceID)
+        // 明示的な切断によって未完了となった送信を通知
+        let disconnectError = NSError(
+            domain: "BLEChatKit",
+            code: 1003,
+            userInfo: [
+                NSLocalizedDescriptionKey:
+                    "BLE connection was disconnected by the application."
+            ]
+        )
 
+        failPendingMessages(
+            for: deviceID,
+            error: disconnectError
+        )
         // 接続状態を更新
         connection.updateState(for: peripheral,
                                to: .disconnecting)
@@ -441,8 +452,20 @@ extension BLECentral: @preconcurrency CBCentralManagerDelegate
         // メッセージCharacteristicを削除
         messageCharacteristics.removeValue(forKey: deviceID)
 
-        // ★ 追加：送信キューをクリーンアップ
-        cleanupConnection(for: deviceID)
+        // 未完了の送信を失敗として通知
+        let disconnectError = error ?? NSError(
+            domain: "BLEChatKit",
+            code: 1002,
+            userInfo: [
+                NSLocalizedDescriptionKey:
+                    "BLE connection disconnected before sending completed."
+            ]
+        )
+
+        failPendingMessages(
+            for: deviceID,
+            error: disconnectError
+        )
 
         // 接続状態を更新
         connection.updateState(for: peripheral,
