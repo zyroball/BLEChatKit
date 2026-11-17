@@ -150,6 +150,13 @@ public final class BLEChatManager
     {
         connectionStates[deviceID] ?? .disconnected
     }
+    
+#if DEBUG
+public func debugDisableNotification(for deviceID: UUID) {
+    central.debugDisableNotification(for: deviceID)
+}
+#endif
+    
 }
 
 
