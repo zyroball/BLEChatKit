@@ -196,8 +196,6 @@ public final class BLECentral: NSObject
         return packets
     }
     
-    
-    
     public func sendChunked(_ message: String,
                             to deviceID: UUID) throws
     {
@@ -213,6 +211,11 @@ public final class BLECentral: NSObject
         let packets = try preparePackets(
             message,
             to: deviceID
+        )
+
+        print(
+            "[BLECentral] Chunk count:",
+            packets.count
         )
 
         // 各パケットに最終チャンク情報を付与
@@ -248,8 +251,6 @@ public final class BLECentral: NSObject
 
         print("BLE connection cleaned:", deviceID)
     }
-    
-    
     
     private func failPendingMessages(for deviceID: UUID,
                                      error: Error)
