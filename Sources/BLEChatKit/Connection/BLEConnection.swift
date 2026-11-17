@@ -33,14 +33,21 @@ public final class BLEConnection
     func updateState(for peripheral: CBPeripheral,
                      to state: BLEConnectionState)
     {
-        states[peripheral.identifier] = state
+        let deviceID = peripheral.identifier
+
+        // 前回と同じ状態なら通知しない
+        if states[deviceID] == state {
+            return
+        }
+
+        states[deviceID] = state
 
         delegate?.connectionDidChangeState(
-            deviceID: peripheral.identifier,
+            deviceID: deviceID,
             state: state
         )
     }
-
+    
     func notifyFailure(for peripheral: CBPeripheral,
                        error: Error?)
     {
