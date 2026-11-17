@@ -335,7 +335,20 @@ extension BLEChatManager: BLEPeripheralDelegate
     public func peripheralDidSubscribe(
         centralID: UUID
     ) {
-        peripheralCentralIDs.insert(centralID)
+        let inserted = peripheralCentralIDs.insert(centralID).inserted
+
+        guard inserted else {
+            return
+        }
+
+        print(
+            "[BLEChatManager] Peripheral Ready:",
+            centralID
+        )
+
+        delegate?.chatManagerDidBecomeReady(
+            deviceID: centralID
+        )
     }
 
     public func peripheralDidUnsubscribe(
