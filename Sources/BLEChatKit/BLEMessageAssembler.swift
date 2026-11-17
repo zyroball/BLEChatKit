@@ -24,6 +24,7 @@ public final class BLEMessageAssembler
     private let maxTotalBufferSize = 10_485_760
     
     private let maxPendingMessages = 100
+    private let maxCompletedMessages = 1_000
     
     private let timeout: TimeInterval = 30
     
@@ -38,6 +39,7 @@ public final class BLEMessageAssembler
     }
 
     private var buffers: [MessageKey: MessageBuffer] = [:]
+    private var completedMessages: [MessageKey: Date] = [:]
     private let lock = NSLock()
     
     // テストから受信バッファの状態を確認する
@@ -83,6 +85,11 @@ public final class BLEMessageAssembler
             deviceID: deviceID,
             messageID: packet.messageID
         )
+        
+        
+        if completedMessages[key] != nil {
+            return nil
+        }
 
         if buffers[key] == nil
         {
@@ -157,8 +164,20 @@ public final class BLEMessageAssembler
 
             result.append(chunk)
         }
-
+        
         buffers.removeValue(forKey: key)
+
+        // 完成済みメッセージを記録
+        completedMessages[key] = nowProvider()
+
+        // 記録が上限を超えたら最も古いものを削除
+        if completedMessages.count > maxCompletedMessages {
+            if let oldestKey = completedMessages.min(
+                by: { $0.value < $1.value }
+            )?.key {
+                completedMessages.removeValue(forKey: oldestKey)
+            }
+        }
 
         return result
     }
@@ -171,14 +190,21 @@ public final class BLEMessageAssembler
         removeExpiredMessagesLocked()
     }
 
+    
     private func removeExpiredMessagesLocked() {
-
         let now = nowProvider()
 
+        // 未完成メッセージの期限切れ処理
         buffers = buffers.filter { _, buffer in
             now.timeIntervalSince(buffer.createdAt) < timeout
         }
+
+        // 完成済みメッセージの期限切れ処理
+        completedMessages = completedMessages.filter { _, date in
+            now.timeIntervalSince(date) < timeout
+        }
     }
+
     
     public func reset()
     {
@@ -188,6 +214,7 @@ public final class BLEMessageAssembler
             lock.unlock()
         }
         buffers.removeAll()
+        completedMessages.removeAll()
     }
     
     
@@ -199,6 +226,11 @@ public final class BLEMessageAssembler
             lock.unlock()
         }
         buffers = buffers.filter { key, _ in
+            key.deviceID != deviceID
+        }
+        completedMessages = completedMessages.filter
+        {
+            key, _ in
             key.deviceID != deviceID
         }
     }
