@@ -12,11 +12,6 @@ import CoreBluetooth
 @MainActor
 public final class BLECentral: NSObject
 {
-    // DEBUG専用：送信途中の切断テスト
-    #if DEBUG
-    private var debugDisconnectAfterFirstChunk = false
-    #endif
-    
     private let messageAssembler = BLEMessageAssembler()
     public weak var delegate: BLECentralDelegate?
     private var centralManager: CBCentralManager!
@@ -240,12 +235,6 @@ public final class BLECentral: NSObject
         // デバイスごとの送信キューに追加
         outgoingPacketQueue.enqueue(outgoingPackets,
                                     for: deviceID)
-        
-        
-#if DEBUG
-debugDisconnectAfterFirstChunk = true
-print("[DEBUG] Mid-transfer disconnect test enabled")
-#endif
 
         // 送信中でなければ送信開始
         sendNextPacket(to: deviceID)
@@ -613,22 +602,6 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate
 
         // 書き込み状態を解除
         writingDevices.remove(deviceID)
-        
-#if DEBUG
-if debugDisconnectAfterFirstChunk,
-   outgoingPacketQueue.count(for: deviceID) > 0 {
-
-    print("[DEBUG] Disconnecting during chunked send")
-    print(
-        "[DEBUG] Remaining packets:",
-        outgoingPacketQueue.count(for: deviceID)
-    )
-
-    debugDisconnectAfterFirstChunk = false
-    disconnect(from: deviceID)
-    return
-}
-#endif
 
         // メッセージの最終チャンクなら通知
         if packet.isLastChunk
