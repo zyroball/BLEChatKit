@@ -529,6 +529,7 @@ extension BLEPeripheral: @preconcurrency CBPeripheralManagerDelegate
         }
 
         serviceReady = true
+        print("[BLEPeripheral] Service registered:", service.uuid)
 
         if advertisingRequested {
             advertise()
