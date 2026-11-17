@@ -207,9 +207,9 @@ public final class BLEPeripheral: NSObject
             contentsOf: encodedPackets
         )
 
-        // TEST ONLY: タイムアウトを再現するため送信再開を停止
-//        sendNextNotification(to: centralID,
-//                             characteristic: characteristic)
+        // 送信処理を開始
+        sendNextNotification(to: centralID,
+                             characteristic: characteristic)
     }
 
     
