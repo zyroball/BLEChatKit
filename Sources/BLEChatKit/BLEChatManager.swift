@@ -358,10 +358,23 @@ extension BLEChatManager: BLEPeripheralDelegate
         )
     }
 
-    public func peripheralDidUnsubscribe(
-        centralID: UUID
-    ) {
-        peripheralCentralIDs.remove(centralID)
+    public func peripheralDidUnsubscribe(centralID: UUID)
+    {
+        let removed = peripheralCentralIDs.remove(centralID)
+
+        guard removed != nil else {
+            return
+        }
+
+        print(
+            "[BLEChatManager] Peripheral Unsubscribed:",
+            centralID
+        )
+
+        print(
+            "[BLEChatManager] Is ready:",
+            isReady(for: centralID)
+        )
     }
 
     public func peripheralDidStartAdvertising() {
