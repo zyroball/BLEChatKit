@@ -21,6 +21,10 @@ public final class BLECentral: NSObject
     public let connection = BLEConnection()
     private var messageCharacteristics:[UUID: CBCharacteristic] = [:]
     
+#if DEBUG
+private var debugDisconnectAfterFirstChunk = false
+#endif
+    
     private var retryCounts: [UUID: Int] = [:]
     private let maxRetryCount = 3
     
