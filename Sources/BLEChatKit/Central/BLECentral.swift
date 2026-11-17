@@ -164,6 +164,32 @@ public final class BLECentral: NSObject
                               type: .withResponse)
     }
     
+#if DEBUG
+public func debugDisableNotification(for deviceID: UUID) {
+
+    guard let peripheral = discoveredPeripherals[deviceID],
+          connection.state(for: deviceID) == .connected,
+          let characteristic = messageCharacteristics[deviceID]
+    else {
+        print(
+            "[BLECentral] Debug disable notification skipped:",
+            deviceID
+        )
+        return
+    }
+
+    print(
+        "[BLECentral] Debug disabling notification:",
+        deviceID
+    )
+
+    peripheral.setNotifyValue(
+        false,
+        for: characteristic
+    )
+}
+#endif
+    
     
     public func preparePackets(_ message: String,
                                to deviceID: UUID) throws -> [BLEMessagePacket]
