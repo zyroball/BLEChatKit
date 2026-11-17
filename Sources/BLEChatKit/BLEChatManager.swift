@@ -139,6 +139,13 @@ public final class BLEChatManager
         return false
     }
     
+    /// Central側のBLE接続状態を取得する。
+    ///
+    /// Peripheral側の購読状態は含まない。
+    /// Peripheral側のみで通信している場合、
+    /// .disconnected を返すことがある。
+    ///
+    /// 送信可能かどうかは isReady(for:) で判定する。
     public func connectionState(for deviceID: UUID) -> BLEConnectionState
     {
         connectionStates[deviceID] ?? .disconnected
