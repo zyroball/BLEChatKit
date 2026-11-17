@@ -231,6 +231,12 @@ public final class BLEPeripheral: NSObject
             return
         }
 
+        // 送信待ちパケットがなければ処理しない
+        guard notificationQueues[centralID]?.isEmpty == false
+        else {
+            return
+        }
+        
         sendingCentrals.insert(centralID)
 
         defer
@@ -329,9 +335,24 @@ public final class BLEPeripheral: NSObject
     
     private func cleanupAllConnections()
     {
+        // 送信キューに残っているメッセージを失敗として通知
+        for (centralID, items) in notificationQueues {
+
+            let messageIDs = Set(
+                items.map { $0.messageID }
+            )
+
+            for messageID in messageIDs {
+                delegate?.peripheralDidFailToSend(
+                    messageID: messageID,
+                    to: centralID,
+                    error: BLESendError.disconnected
+                )
+            }
+        }
+
         // 送信キューをすべて削除
         notificationQueues.removeAll()
-
         // タイムアウト監視をすべて解除
         for task in notificationTimeoutTasks.values
         {
@@ -385,19 +406,23 @@ public final class BLEPeripheral: NSObject
 
             print("BLE notification timeout:", centralID)
 
-            // 通知前に送信キューを破棄
-            self.notificationQueues.removeValue(
+            let failedItems = self.notificationQueues.removeValue(
                 forKey: centralID
-            )
+            ) ?? []
 
-            // タイムアウト監視を解除
             self.cancelNotificationTimeout(for: centralID)
 
-            // 状態をクリアした後にアプリへ通知
-            self.delegate?.peripheralDidFailToSend(
-                to: centralID,
-                error: BLESendError.notificationTimeout
+            let messageIDs = Set(
+                failedItems.map { $0.messageID }
             )
+
+            for messageID in messageIDs {
+                self.delegate?.peripheralDidFailToSend(
+                    messageID: messageID,
+                    to: centralID,
+                    error: BLESendError.notificationTimeout
+                )
+            }
         }
 
         notificationTimeoutTasks[centralID] = task
@@ -622,8 +647,28 @@ extension BLEPeripheral: @preconcurrency CBPeripheralManagerDelegate
         // 購読デバイスを削除
         subscribedCentrals.removeValue(forKey: centralID)
 
-        // 未送信キューを破棄
-        notificationQueues.removeValue(forKey: centralID)
+        // 未送信キューを取得して破棄
+        let pendingItems = notificationQueues.removeValue(
+            forKey: centralID
+        ) ?? []
+
+        // 未送信メッセージIDを取得
+        let pendingMessageIDs = Set(
+            pendingItems.map { $0.messageID }
+        )
+        
+        for messageID in pendingMessageIDs {
+            delegate?.peripheralDidFailToSend(
+                messageID: messageID,
+                to: centralID,
+                error: BLESendError.disconnected
+            )
+        }
+
+        print(
+            "[BLEPeripheral] Unsubscribed pending messages:",
+            pendingMessageIDs.count
+        )
 
         // タイムアウト監視を解除
         cancelNotificationTimeout(for: centralID)

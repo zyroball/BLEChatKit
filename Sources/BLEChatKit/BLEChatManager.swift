@@ -447,4 +447,25 @@ extension BLEChatManager: BLEPeripheralDelegate
 
         onSendCompleted?(messageID, centralID)
     }
+    
+    public func peripheralDidFailToSend(
+        messageID: UUID,
+        to centralID: UUID,
+        error: Error
+    ) {
+        print(
+            "[BLEChatManager] Peripheral message failed:",
+            messageID,
+            "to:",
+            centralID,
+            "error:",
+            error
+        )
+
+        onSendFailed?(
+            messageID,
+            centralID,
+            error
+        )
+    }
 }
