@@ -596,13 +596,23 @@ extension BLEPeripheral: @preconcurrency CBPeripheralManagerDelegate
         // 送信中フラグを解除
         sendingCentrals.remove(centralID)
 
-        // 受信途中の分割データを破棄
-        messageAssembler.reset(for: centralID)
-        
-        print(
-            "[BLEPeripheral] Message assembler reset:",
-            centralID
-        )
+#if DEBUG
+print(
+    "[BLEPeripheral] Pending before reset:",
+    messageAssembler.debugPendingMessageCount(for: centralID)
+)
+#endif
+
+messageAssembler.reset(for: centralID)
+
+#if DEBUG
+print(
+    "[BLEPeripheral] Pending after reset:",
+    messageAssembler.debugPendingMessageCount(for: centralID)
+)
+#endif
+
+        print("[BLEPeripheral] Message assembler reset:", centralID)
         
         // 購読解除をManagerへ通知
         delegate?.peripheralDidUnsubscribe(centralID: centralID)
