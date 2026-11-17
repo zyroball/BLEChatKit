@@ -156,10 +156,7 @@ extension BLEChatManager: BLECentralDelegate
         // 接続デバイスの登録を解除
         centralDeviceIDs.remove(deviceID)
 
-        // 接続状態を更新
-        connectionStates[deviceID] = .disconnected
-
-        // 状態変更の通知は
+        // 接続状態の更新と通知は
         // connectionDidChangeState に一本化する
     }
     
@@ -192,12 +189,8 @@ extension BLEChatManager: BLECentralDelegate
                     continue
                 }
 
-                connectionStates[deviceID] = .disconnected
-
-                // アプリ側へ切断を通知
-                delegate?.chatManagerDidChangeConnectionState(
-                    deviceID: deviceID,
-                    state: .disconnected
+                connectionDidChangeState(deviceID: deviceID,
+                                         state: .disconnected
                 )
             }
         }
@@ -265,18 +258,24 @@ extension BLEChatManager: BLECentralDelegate
 extension BLEChatManager: BLEConnectionDelegate
 {
     
-    public func connectionDidChangeState(deviceID: UUID,
-                                         state: BLEConnectionState)
-    {
+    public func connectionDidChangeState(
+        deviceID: UUID,
+        state: BLEConnectionState
+    ) {
+        // 同じ状態なら通知しない
+        guard connectionStates[deviceID] != state else {
+            return
+        }
+
+        // 接続状態を更新
         connectionStates[deviceID] = state
+
         switch state {
 
         case .disconnecting:
-            // 切断開始時点で送信を禁止
             readyCentralDeviceIDs.remove(deviceID)
 
         case .disconnected:
-            // 切断完了時にデバイス情報を削除
             readyCentralDeviceIDs.remove(deviceID)
             centralDeviceIDs.remove(deviceID)
 
@@ -284,12 +283,12 @@ extension BLEChatManager: BLEConnectionDelegate
             break
         }
 
-        // アプリ側へ接続状態を通知
-        delegate?.chatManagerDidChangeConnectionState(deviceID: deviceID,
-                                                      state: state)
+        // アプリ側へ状態変更を通知
+        delegate?.chatManagerDidChangeConnectionState(
+            deviceID: deviceID,
+            state: state
+        )
     }
-
-
 
     public func connectionDidFail(
         deviceID: UUID,
