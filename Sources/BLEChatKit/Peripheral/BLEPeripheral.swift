@@ -259,6 +259,11 @@ public final class BLEPeripheral: NSObject
                     "[BLEPeripheral] Message enqueue completed:",
                     item.messageID
                 )
+
+                delegate?.peripheralDidFinishEnqueuing(
+                    messageID: item.messageID,
+                    to: centralID
+                )
             }
 
             if notificationQueues[centralID]?.isEmpty == true {
