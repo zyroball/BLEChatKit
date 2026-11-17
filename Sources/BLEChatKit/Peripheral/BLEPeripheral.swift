@@ -217,7 +217,12 @@ public final class BLEPeripheral: NSObject
     private func sendNextNotification(to centralID: UUID,
                                       characteristic: CBMutableCharacteristic)
     {
-
+        print(
+               "[BLEPeripheral] sendNextNotification called:",
+               centralID,
+               "queue:",
+               notificationQueues[centralID]?.count ?? 0
+           )
         // 同じCentralへの送信処理が実行中なら終了
         guard !sendingCentrals.contains(centralID)
         else
