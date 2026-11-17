@@ -25,7 +25,7 @@ public final class BLEPeripheral: NSObject
     private var messageCharacteristic: CBMutableCharacteristic?
     private var subscribedCentrals: [UUID: CBCentral] = [:]
     private var notificationTimeoutTasks: [UUID: DispatchWorkItem] = [:]
-    private let notificationTimeout: TimeInterval = 30
+    private let notificationTimeout: TimeInterval = 3
     
     // 1デバイスあたりの送信待ちデータ上限：2MB
     private let maxNotificationQueueBytes = 2_097_152
@@ -207,9 +207,9 @@ public final class BLEPeripheral: NSObject
             contentsOf: encodedPackets
         )
 
-
-        sendNextNotification(to: centralID,
-                             characteristic: characteristic)
+        // TEST ONLY: タイムアウトを再現するため送信再開を停止
+//        sendNextNotification(to: centralID,
+//                             characteristic: characteristic)
     }
 
     
