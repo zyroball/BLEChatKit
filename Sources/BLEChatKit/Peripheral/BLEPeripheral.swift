@@ -253,6 +253,16 @@ public final class BLEPeripheral: NSObject
             )
 
             guard success else {
+                print(
+                    "[BLEPeripheral] Backpressure detected:",
+                    centralID
+                )
+
+                print(
+                    "[BLEPeripheral] Remaining packets:",
+                    notificationQueues[centralID]?.count ?? 0
+                )
+
                 break
             }
 
