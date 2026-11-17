@@ -599,6 +599,11 @@ extension BLEPeripheral: @preconcurrency CBPeripheralManagerDelegate
         // 受信途中の分割データを破棄
         messageAssembler.reset(for: centralID)
         
+        print(
+            "[BLEPeripheral] Message assembler reset:",
+            centralID
+        )
+        
         // 購読解除をManagerへ通知
         delegate?.peripheralDidUnsubscribe(centralID: centralID)
 
