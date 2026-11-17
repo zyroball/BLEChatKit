@@ -159,11 +159,8 @@ extension BLEChatManager: BLECentralDelegate
         // 接続状態を更新
         connectionStates[deviceID] = .disconnected
 
-        // アプリ側へ切断を通知
-        delegate?.chatManagerDidChangeConnectionState(
-            deviceID: deviceID,
-            state: .disconnected
-        )
+        // 状態変更の通知は
+        // connectionDidChangeState に一本化する
     }
     
     public func centralDidFinishSending(messageID: UUID,
