@@ -401,6 +401,10 @@ public final class BLEPeripheral: NSObject
     
     private func startNotificationTimeout(for centralID: UUID)
     {
+        print(
+                "[BLEPeripheral] Starting notification timeout:",
+                centralID
+            )
         cancelNotificationTimeout(for: centralID)
 
         let task = DispatchWorkItem { [weak self] in
