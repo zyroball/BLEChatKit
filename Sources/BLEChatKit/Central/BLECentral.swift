@@ -113,6 +113,11 @@ public final class BLECentral: NSObject
                     "BLE connection was disconnected by the application."
             ]
         )
+        
+        print(
+            "[BLEChatKit] Pending packets before disconnect:",
+            outgoingPacketQueue.count(for: deviceID)
+        )
 
         failPendingMessages(
             for: deviceID,
