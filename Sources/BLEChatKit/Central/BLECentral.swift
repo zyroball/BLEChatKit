@@ -466,6 +466,12 @@ extension BLECentral: @preconcurrency CBCentralManagerDelegate
                     "BLE connection disconnected before sending completed."
             ]
         )
+        
+        print("[BLECentral] Disconnected:", deviceID)
+        print("[BLECentral] Disconnect error:",
+              disconnectError.localizedDescription)
+        print("[BLECentral] Pending messages:",
+              outgoingPacketQueue.messageIDs(for: deviceID).count)
 
         failPendingMessages(
             for: deviceID,
