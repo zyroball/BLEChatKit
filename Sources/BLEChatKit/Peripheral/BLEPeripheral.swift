@@ -12,8 +12,13 @@ import CoreBluetooth
 @MainActor
 public final class BLEPeripheral: NSObject
 {
+    private struct NotificationItem {
+        let messageID: UUID
+        let data: Data
+    }
+    
     private let messageAssembler = BLEMessageAssembler()
-    private var notificationQueues: [UUID: [Data]] = [:]
+    private var notificationQueues: [UUID: [NotificationItem]] = [:]
     private var sendingCentrals: Set<UUID> = []
     public weak var delegate: BLEPeripheralDelegate?
     private var peripheralManager: CBPeripheralManager!
@@ -158,14 +163,25 @@ public final class BLEPeripheral: NSObject
         let packets = try BLEMessagePacketBuilder.build(message: message,
                                                         chunkSize: chunkSize
         )
+        
+        guard let messageID = packets.first?.messageID else {
+            throw BLETransportError.invalidMessage
+        }
 
-        let encodedPackets = try packets.map
-        {
-            try $0.encode()
+        print(
+            "[BLEPeripheral] Sending messageID:",
+            messageID
+        )
+
+        let encodedPackets = try packets.map { packet in
+            NotificationItem(
+                messageID: packet.messageID,
+                data: try packet.encode()
+            )
         }
 
         guard encodedPackets.allSatisfy({
-            $0.count <= maximumLength
+            $0.data.count <= maximumLength
         }) else {
             throw BLETransportError.messageTooLarge
         }
@@ -174,9 +190,8 @@ public final class BLEPeripheral: NSObject
         let currentSize = notificationQueueSize(for: centralID)
 
         // 今回追加するパケットの合計サイズ
-        let additionalSize = encodedPackets.reduce(0)
-        {
-            $0 + $1.count
+        let additionalSize = encodedPackets.reduce(0) {
+            $0 + $1.data.count
         }
 
         // 送信キューの上限を確認
@@ -223,24 +238,30 @@ public final class BLEPeripheral: NSObject
             sendingCentrals.remove(centralID)
         }
 
-        while let data = notificationQueues[centralID]?.first
-        {
+        while let item = notificationQueues[centralID]?.first {
 
-            let success = peripheralManager.updateValue(data,
-                                                        for: characteristic,
-                                                        onSubscribedCentrals: [central])
+            let success = peripheralManager.updateValue(
+                item.data,
+                for: characteristic,
+                onSubscribedCentrals: [central]
+            )
 
-            guard success
-            else
-            {
-                // 送信バッファが満杯
+            guard success else {
                 break
             }
 
             notificationQueues[centralID]?.removeFirst()
 
-            if notificationQueues[centralID]?.isEmpty == true
-            {
+            let nextMessageID = notificationQueues[centralID]?.first?.messageID
+
+            if nextMessageID != item.messageID {
+                print(
+                    "[BLEPeripheral] Message enqueue completed:",
+                    item.messageID
+                )
+            }
+
+            if notificationQueues[centralID]?.isEmpty == true {
                 notificationQueues.removeValue(forKey: centralID)
             }
         }
@@ -331,7 +352,9 @@ public final class BLEPeripheral: NSObject
     
     private func notificationQueueSize(for centralID: UUID) -> Int
     {
-        notificationQueues[centralID]?.reduce(0) { $0 + $1.count } ?? 0
+        notificationQueues[centralID]?.reduce(0) {
+            $0 + $1.data.count
+        } ?? 0
     }
     
     private func cancelNotificationTimeout(for centralID: UUID)
