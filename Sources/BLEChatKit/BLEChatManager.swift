@@ -371,10 +371,7 @@ extension BLEChatManager: BLEPeripheralDelegate
             centralID
         )
 
-        print(
-            "[BLEChatManager] Is ready:",
-            isReady(for: centralID)
-        )
+        print("[BLEChatManager] Ready devices after unsubscribe:", readyDeviceIDs)
     }
 
     public func peripheralDidStartAdvertising() {
