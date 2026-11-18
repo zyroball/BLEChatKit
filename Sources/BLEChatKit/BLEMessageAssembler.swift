@@ -10,13 +10,16 @@ import Foundation
 
 public final class BLEMessageAssembler
 {
-    private struct MessageBuffer
-    {
+    private struct MessageBuffer {
+
         let totalChunks: Int
+
         let createdAt: Date
+
+        var lastReceivedAt: Date
+
         var chunks: [Int: Data] = [:]
     }
-    
     // 1メッセージの最大サイズ：1MB
     private let maxMessageSize = 1_048_576
 
@@ -27,7 +30,7 @@ public final class BLEMessageAssembler
     private let maxChunksPerMessage = 10_000
     private let maxCompletedMessages = 1_000
     
-    private let timeout: TimeInterval = 300
+    private let timeout: TimeInterval = 30
     
     internal var nowProvider: () -> Date = {
         Date()
@@ -103,7 +106,8 @@ public final class BLEMessageAssembler
 
             buffers[key] = MessageBuffer(
                 totalChunks: packet.totalChunks,
-                createdAt: nowProvider()
+                createdAt: nowProvider(),
+                lastReceivedAt: nowProvider()
             )
         }
 
@@ -146,6 +150,7 @@ public final class BLEMessageAssembler
 
         // サイズに問題がなければ保存
         buffer.chunks[packet.chunkIndex] = packet.payload
+        buffer.lastReceivedAt = nowProvider()
         buffers[key] = buffer
 
         guard buffer.chunks.count == buffer.totalChunks
@@ -198,7 +203,7 @@ public final class BLEMessageAssembler
 
         // 未完成メッセージの期限切れ処理
         buffers = buffers.filter { _, buffer in
-            now.timeIntervalSince(buffer.createdAt) < timeout
+            now.timeIntervalSince(buffer.lastReceivedAt) < timeout
         }
 
         // 完成済みメッセージの期限切れ処理
