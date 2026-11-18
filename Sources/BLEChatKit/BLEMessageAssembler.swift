@@ -27,7 +27,7 @@ public final class BLEMessageAssembler
     private let maxChunksPerMessage = 10_000
     private let maxCompletedMessages = 1_000
     
-    private let timeout: TimeInterval = 30
+    private let timeout: TimeInterval = 300
     
     internal var nowProvider: () -> Date = {
         Date()
