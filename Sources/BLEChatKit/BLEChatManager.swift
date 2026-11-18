@@ -146,11 +146,15 @@ public final class BLEChatManager
     /// .disconnected を返すことがある。
     ///
     /// 送信可能かどうかは isReady(for:) で判定する。
-    public func connectionState(for deviceID: UUID) -> BLEConnectionState
-    {
-        connectionStates[deviceID] ?? .disconnected
+    public func connectionState(for deviceID: UUID) -> BLEConnectionState {
+
+        if peripheralCentralIDs.contains(deviceID) {
+            return .connected
+        }
+
+        return connectionStates[deviceID] ?? .disconnected
     }
-    
+
 #if DEBUG
 public func debugDisableNotification(for deviceID: UUID) {
     central.debugDisableNotification(for: deviceID)
