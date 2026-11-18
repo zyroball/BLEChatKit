@@ -12,9 +12,15 @@ import CoreBluetooth
 @MainActor
 public final class BLEPeripheral: NSObject
 {
+    private enum NotificationKind {
+        case message
+        case acknowledgment
+    }
+
     private struct NotificationItem {
         let messageID: UUID
         let data: Data
+        let kind: NotificationKind
     }
     
     private let messageAssembler = BLEMessageAssembler()
@@ -177,7 +183,8 @@ public final class BLEPeripheral: NSObject
         let encodedPackets = try packets.map { packet in
             NotificationItem(
                 messageID: packet.messageID,
-                data: try packet.encode()
+                data: try packet.encode(),
+                kind: .message
             )
         }
 
@@ -276,7 +283,9 @@ public final class BLEPeripheral: NSObject
 
             let nextMessageID = notificationQueues[centralID]?.first?.messageID
 
-            if nextMessageID != item.messageID {
+            if nextMessageID != item.messageID,
+               item.kind == .message {
+
                 print(
                     "[BLEPeripheral] Message enqueue completed:",
                     item.messageID
@@ -468,6 +477,48 @@ public final class BLEPeripheral: NSObject
             execute: task
         )
     }
+    
+    func sendAcknowledgment(
+        messageID: UUID,
+        to centralID: UUID
+    ) throws {
+        guard let central = subscribedCentrals[centralID],
+              let characteristic = messageCharacteristic
+        else {
+            throw BLETransportError.invalidMessage
+        }
+
+        let packet = BLEAcknowledgmentPacket(
+            messageID: messageID
+        )
+
+        let data = packet.encode()
+
+        guard data.count <= central.maximumUpdateValueLength else {
+            throw BLETransportError.messageTooLarge
+        }
+
+        let currentSize = notificationQueueSize(for: centralID)
+
+        guard data.count <= maxNotificationQueueBytes,
+              currentSize <= maxNotificationQueueBytes - data.count
+        else {
+            throw BLETransportError.messageTooLarge
+        }
+
+        let item = NotificationItem(
+            messageID: messageID,
+            data: data,
+            kind: .acknowledgment
+        )
+
+        notificationQueues[centralID, default: []].append(item)
+
+        sendNextNotification(
+            to: centralID,
+            characteristic: characteristic
+        )
+    }
 }
 
 // MARK: - CBPeripheralManagerDelegate
@@ -570,18 +621,58 @@ extension BLEPeripheral: @preconcurrency CBPeripheralManagerDelegate
                     // 分割パケットをデコード
                     let packet = try BLEMessagePacket.decode(from: data)
                     
-                    // 分割データを再構築
-                    if let restoredData = messageAssembler.append(packet,
-                                                                  from: request.central.identifier)
-                    {
+                    if messageAssembler.isMessageCompleted(
+                        messageID: packet.messageID,
+                        from: request.central.identifier
+                    ) {
+                        if packet.chunkIndex == packet.totalChunks - 1 {
+                            do {
+                                try sendAcknowledgment(
+                                    messageID: packet.messageID,
+                                    to: request.central.identifier
+                                )
+                            } catch {
+                                print(
+                                    "[BLEPeripheral] Duplicate ACK enqueue failed:",
+                                    error
+                                )
+                            }
+                        }
+
+                        peripheral.respond(
+                            to: request,
+                            withResult: .success
+                        )
+                        continue
+                    }
+                    
+                    if let restoredData = messageAssembler.append(
+                        packet,
+                        from: request.central.identifier
+                    ) {
                         let message = try BLETransport.decode(
                             restoredData
                         )
-                        
+
+                        messageAssembler.markMessageCompleted(
+                            messageID: packet.messageID,
+                            from: request.central.identifier
+                        )
+
                         delegate?.peripheralDidReceiveMessage(
                             message,
                             from: request.central.identifier
                         )
+
+                        // 受信完了ACKを送信
+                        do {
+                            try sendAcknowledgment(
+                                messageID: packet.messageID,
+                                to: request.central.identifier
+                            )
+                        } catch {
+                            print("[BLEPeripheral] ACK enqueue failed:", error)
+                        }
                     }
                 }
                 else

@@ -29,6 +29,7 @@ public final class BLEMessageAssembler
     private let maxPendingMessages = 100
     private let maxChunksPerMessage = 10_000
     private let maxCompletedMessages = 1_000
+    private let completedMessageRetention: TimeInterval = 300
     
     private let timeout: TimeInterval = 30
     
@@ -171,22 +172,28 @@ public final class BLEMessageAssembler
 
             result.append(chunk)
         }
-        
         buffers.removeValue(forKey: key)
 
-        // 完成済みメッセージを記録
-        completedMessages[key] = nowProvider()
-
-        // 記録が上限を超えたら最も古いものを削除
-        if completedMessages.count > maxCompletedMessages {
-            if let oldestKey = completedMessages.min(
-                by: { $0.value < $1.value }
-            )?.key {
-                completedMessages.removeValue(forKey: oldestKey)
-            }
+        return result
+    }
+    
+    public func isMessageCompleted(
+        messageID: UUID,
+        from deviceID: UUID
+    ) -> Bool {
+        lock.lock()
+        defer {
+            lock.unlock()
         }
 
-        return result
+        removeExpiredMessagesLocked()
+
+        let key = MessageKey(
+            deviceID: deviceID,
+            messageID: messageID
+        )
+
+        return completedMessages[key] != nil
     }
 
     public func removeExpiredMessages()
@@ -208,7 +215,7 @@ public final class BLEMessageAssembler
 
         // 完成済みメッセージの期限切れ処理
         completedMessages = completedMessages.filter { _, date in
-            now.timeIntervalSince(date) < timeout
+            now.timeIntervalSince(date) < completedMessageRetention
         }
     }
 
@@ -254,4 +261,30 @@ public final class BLEMessageAssembler
         }
     }
 
+    public func markMessageCompleted(
+        messageID: UUID,
+        from deviceID: UUID
+    ) {
+        lock.lock()
+        defer {
+            lock.unlock()
+        }
+
+        removeExpiredMessagesLocked()
+
+        let key = MessageKey(
+            deviceID: deviceID,
+            messageID: messageID
+        )
+
+        completedMessages[key] = nowProvider()
+
+        if completedMessages.count > maxCompletedMessages {
+            if let oldestKey = completedMessages.min(
+                by: { $0.value < $1.value }
+            )?.key {
+                completedMessages.removeValue(forKey: oldestKey)
+            }
+        }
+    }
 }

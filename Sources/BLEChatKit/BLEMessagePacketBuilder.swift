@@ -11,7 +11,8 @@ import Foundation
 public enum BLEMessagePacketBuilder
 {
     public static func build(message: String,
-                             chunkSize: Int) throws -> [BLEMessagePacket]
+                             chunkSize: Int,
+                             messageID: UUID = UUID()) throws -> [BLEMessagePacket]
     {
 
         guard chunkSize > 0 else
@@ -23,8 +24,6 @@ public enum BLEMessagePacketBuilder
 
         let chunks = BLEMessageChunker.split(data,
                                              chunkSize: chunkSize)
-
-        let messageID = UUID()
 
         return chunks.enumerated().map { index, chunk in
 

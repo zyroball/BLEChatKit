@@ -115,5 +115,4 @@ public extension BLEMessagePacket
         return data[data.startIndex] == 0xBC &&
                data[data.startIndex + 1] == 0x01
     }
-
 }

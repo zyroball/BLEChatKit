@@ -12,11 +12,24 @@ import CoreBluetooth
 @MainActor
 public final class BLECentral: NSObject
 {
+    private struct PendingAcknowledgment {
+        let messageID: UUID
+        let deviceID: UUID
+        let packets: [BLEOutgoingPacketQueue.OutgoingPacket]
+        var retryCount: Int
+    }
+
+    private var pendingAcknowledgments:
+        [UUID: [UUID: PendingAcknowledgment]] = [:]
     private let messageAssembler = BLEMessageAssembler()
     public weak var delegate: BLECentralDelegate?
     private var centralManager: CBCentralManager!
     private var discoveredPeripherals:[UUID: CBPeripheral] = [:]
     private var writeTimeoutIDs: [UUID: UUID] = [:]
+    private let acknowledgmentTimeout: TimeInterval = 30
+    private var acknowledgmentTimeoutTasks:
+        [UUID: [UUID: Task<Void, Never>]] = [:]
+    private let maxAcknowledgmentRetryCount = 3
     // 通知購読の設定処理中
     private var subscribingNotificationDevices = Set<UUID>()
     private var subscribingCharacteristics: [UUID: CBCharacteristic] = [:]
@@ -166,6 +179,60 @@ public final class BLECentral: NSObject
                               type: .withResponse)
     }
     
+    private func cancelAcknowledgmentTimeout(
+        messageID: UUID,
+        for deviceID: UUID
+    ) {
+        acknowledgmentTimeoutTasks[deviceID]?
+            .removeValue(forKey: messageID)?
+            .cancel()
+
+        if acknowledgmentTimeoutTasks[deviceID]?.isEmpty == true {
+            acknowledgmentTimeoutTasks.removeValue(forKey: deviceID)
+        }
+    }
+    
+    private func startAcknowledgmentTimeout(
+        messageID: UUID,
+        for deviceID: UUID
+    ) {
+        cancelAcknowledgmentTimeout(
+            messageID: messageID,
+            for: deviceID
+        )
+
+        let timeout = acknowledgmentTimeout
+
+        let task = Task { @MainActor [weak self] in
+            try? await Task.sleep(
+                nanoseconds: UInt64(timeout * 1_000_000_000)
+            )
+
+            guard !Task.isCancelled else {
+                return
+            }
+
+            guard let self,
+                  self.pendingAcknowledgments[deviceID]?[messageID] != nil
+            else {
+                return
+            }
+
+            print(
+                "[BLECentral] ACK timeout:",
+                messageID,
+                "device:",
+                deviceID
+            )
+            self.retryPendingAcknowledgment(
+                messageID: messageID,
+                for: deviceID
+            )
+        }
+
+        acknowledgmentTimeoutTasks[deviceID, default: [:]][messageID] = task
+    }
+    
 #if DEBUG
 public func debugDisableNotification(for deviceID: UUID) {
 
@@ -297,6 +364,18 @@ public func debugEnableNotification(for deviceID: UUID) {
             )
         }
 
+        guard let messageID = outgoingPackets.first?.messageID else {
+            throw BLETransportError.invalidMessage
+        }
+
+        let pending = PendingAcknowledgment(
+            messageID: messageID,
+            deviceID: deviceID,
+            packets: outgoingPackets,
+            retryCount: 0
+        )
+
+        pendingAcknowledgments[deviceID, default: [:]][messageID] = pending
         // デバイスごとの送信キューに追加
         outgoingPacketQueue.enqueue(outgoingPackets,
                                     for: deviceID)
@@ -466,6 +545,55 @@ public func debugEnableNotification(for deviceID: UUID) {
 
         DispatchQueue.main.asyncAfter(deadline: .now() + writeTimeout,
                                       execute: task)
+    }
+    
+    private func retryPendingAcknowledgment(
+        messageID: UUID,
+        for deviceID: UUID
+    ) {
+        guard var pending =
+            pendingAcknowledgments[deviceID]?[messageID]
+        else {
+            return
+        }
+
+        guard pending.retryCount < maxAcknowledgmentRetryCount else {
+            print(
+                "[BLECentral] ACK retry limit reached:",
+                messageID
+            )
+            return
+        }
+
+        guard let peripheral = discoveredPeripherals[deviceID],
+              peripheral.state == .connected,
+              messageCharacteristics[deviceID] != nil,
+              !disconnectingDevices.contains(deviceID)
+        else {
+            print(
+                "[BLECentral] ACK retry deferred (disconnected):",
+                messageID
+            )
+            return
+        }
+
+        pending.retryCount += 1
+
+        pendingAcknowledgments[deviceID]?[messageID] = pending
+
+        print(
+            "[BLECentral] ACK retry:",
+            pending.retryCount,
+            "message:",
+            messageID
+        )
+
+        outgoingPacketQueue.enqueue(
+            pending.packets,
+            for: deviceID
+        )
+
+        sendNextPacket(to: deviceID)
     }
 }
 
@@ -891,11 +1019,20 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate
         // 書き込み状態を解除
         writingDevices.remove(deviceID)
 
-        // メッセージの最終チャンクなら通知
-        if packet.isLastChunk
-        {
-            delegate?.centralDidFinishSending(messageID: packet.messageID,
-                                              to: deviceID)
+        if packet.isLastChunk {
+            // 全チャンクのATT書き込み完了
+            delegate?.centralDidFinishSending(
+                messageID: packet.messageID,
+                to: deviceID
+            )
+
+            // ACK待機中の場合のみタイマー開始
+            if pendingAcknowledgments[deviceID]?[packet.messageID] != nil {
+                startAcknowledgmentTimeout(
+                    messageID: packet.messageID,
+                    for: deviceID
+                )
+            }
         }
 
         // 次のチャンクを送信
@@ -1191,6 +1328,45 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate
 
         do
         {
+            // ACKパケットを受信した場合
+            if BLEAcknowledgmentPacket.isPacket(data) {
+                let ack = try BLEAcknowledgmentPacket.decode(from: data)
+
+                let deviceID = peripheral.identifier
+
+                guard let pending =
+                    pendingAcknowledgments[deviceID]?[ack.messageID]
+                else {
+                    print(
+                        "[BLECentral] Unknown ACK:",
+                        ack.messageID,
+                        "from:",
+                        deviceID
+                    )
+                    return
+                }
+
+                print(
+                    "[BLECentral] ACK matched:",
+                    pending.messageID,
+                    "from:",
+                    deviceID
+                )
+                
+                cancelAcknowledgmentTimeout(
+                    messageID: ack.messageID,
+                    for: deviceID
+                )
+
+                pendingAcknowledgments[deviceID]?
+                    .removeValue(forKey: ack.messageID)
+
+                if pendingAcknowledgments[deviceID]?.isEmpty == true {
+                    pendingAcknowledgments.removeValue(forKey: deviceID)
+                }
+
+                return
+            }
             // 分割パケットとしてデコード
             if BLEMessagePacket.isPacket(data)
             {
@@ -1205,9 +1381,16 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate
 
                 let message = try BLETransport.decode(restoredData)
 
-                delegate?.centralDidReceiveMessage(message,
-                                                   from: peripheral.identifier)
-            }
+                // デコード成功後に完成済みとして登録
+                messageAssembler.markMessageCompleted(
+                    messageID: packet.messageID,
+                    from: peripheral.identifier
+                )
+
+                delegate?.centralDidReceiveMessage(
+                    message,
+                    from: peripheral.identifier
+                )            }
             else
             {
                 let message = try BLETransport.decode(data)
@@ -1221,5 +1404,4 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate
             print("BLE message decode error: \(error)")
         }
     }
-
 }
