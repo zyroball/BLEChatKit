@@ -248,6 +248,7 @@ public final class BLEPeripheral: NSObject
             sendingCentrals.remove(centralID)
         }
 
+        var didSendPacket = false
         while let item = notificationQueues[centralID]?.first {
 
             let success = peripheralManager.updateValue(
@@ -271,6 +272,7 @@ public final class BLEPeripheral: NSObject
             }
 
             notificationQueues[centralID]?.removeFirst()
+            didSendPacket = true
 
             let nextMessageID = notificationQueues[centralID]?.first?.messageID
 
@@ -304,7 +306,8 @@ public final class BLEPeripheral: NSObject
                 to: centralID
             )
         }
-        else if notificationTimeoutTasks[centralID] == nil
+        else if didSendPacket ||
+                notificationTimeoutTasks[centralID] == nil
         {
 
             startNotificationTimeout(for: centralID)
