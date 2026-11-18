@@ -279,6 +279,8 @@ extension BLEChatManager: BLECentralDelegate
     
     public func centralDidBecomeReady(deviceID: UUID) {
 
+        let wasReady = isReady(for: deviceID)
+
         let inserted = readyCentralDeviceIDs.insert(deviceID).inserted
 
         print(
@@ -288,7 +290,7 @@ extension BLEChatManager: BLECentralDelegate
             inserted
         )
 
-        guard inserted else {
+        guard inserted && !wasReady else {
             return
         }
 
@@ -415,6 +417,8 @@ extension BLEChatManager: BLEPeripheralDelegate
     public func peripheralDidSubscribe(
         centralID: UUID
     ) {
+        let wasReady = isReady(for: centralID)
+
         let inserted = peripheralCentralIDs.insert(centralID).inserted
 
         guard inserted else {
@@ -425,6 +429,10 @@ extension BLEChatManager: BLEPeripheralDelegate
             "[BLEChatManager] Peripheral Ready:",
             centralID
         )
+
+        guard !wasReady else {
+            return
+        }
 
         delegate?.chatManagerDidBecomeReady(
             deviceID: centralID
