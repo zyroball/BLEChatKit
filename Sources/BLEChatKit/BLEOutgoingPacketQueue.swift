@@ -16,6 +16,10 @@ final class BLEOutgoingPacketQueue {
     }
 
     private var queues: [UUID: [OutgoingPacket]] = [:]
+    // 送信待ちパケットが存在する全デバイスID
+    var allDeviceIDs: [UUID] {
+        Array(queues.keys)
+    }
     
     // MARK: - パケット追加
 

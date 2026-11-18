@@ -24,7 +24,6 @@ public final class BLEChatManager
     public var onSendCompleted: ((_ messageID: UUID,
                                   _ deviceID: UUID) -> Void)?
     
-    
     public var onSendFailed: ((_ messageID: UUID?,
                                _ deviceID: UUID,
                                _ error: Error) -> Void)?
@@ -214,7 +213,6 @@ extension BLEChatManager: BLECentralDelegate
 
         onSendCompleted?(messageID,deviceID)
     }
-
     
     public func centralDidUpdateState(_ state: BLECentralState)
     {
@@ -334,12 +332,16 @@ extension BLEChatManager: BLEConnectionDelegate
         state: BLEConnectionState
     ) {
         // 同じ状態なら通知しない
-        guard connectionStates[deviceID] != state else {
+        guard (connectionStates[deviceID] ?? .disconnected) != state else {
             return
         }
 
         // 接続状態を更新
-        connectionStates[deviceID] = state
+        if state == .disconnected {
+            connectionStates.removeValue(forKey: deviceID)
+        } else {
+            connectionStates[deviceID] = state
+        }
 
         switch state {
 
@@ -399,8 +401,25 @@ extension BLEChatManager: BLEPeripheralDelegate
 
         if !isPeripheralReady
         {
+            // Bluetooth停止前のReady状態を保持
+            let readyDeviceIDs = peripheralCentralIDs.filter {
+                isReady(for: $0)
+            }
+
             // Peripheral側の購読デバイス情報をクリア
             peripheralCentralIDs.removeAll()
+
+            // Central側もReadyでなければNotReadyを通知
+            for deviceID in readyDeviceIDs
+            {
+                guard !isReady(for: deviceID) else {
+                    continue
+                }
+
+                delegate?.chatManagerDidBecomeNotReady(
+                    deviceID: deviceID
+                )
+            }
         }
 
         if shouldRun && isPeripheralReady

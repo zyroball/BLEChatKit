@@ -349,24 +349,19 @@ public final class BLEPeripheral: NSObject
     
     private func cleanupAllConnections()
     {
-        // 送信キューに残っているメッセージを失敗として通知
-        for (centralID, items) in notificationQueues {
+        // 失敗通知に必要な情報を退避
+        let pendingMessages = notificationQueues.map {
+            (centralID, items) in
 
-            let messageIDs = Set(
-                items.map { $0.messageID }
+            (
+                centralID,
+                Set(items.map { $0.messageID })
             )
-
-            for messageID in messageIDs {
-                delegate?.peripheralDidFailToSend(
-                    messageID: messageID,
-                    to: centralID,
-                    error: BLESendError.disconnected
-                )
-            }
         }
 
         // 送信キューをすべて削除
         notificationQueues.removeAll()
+
         // タイムアウト監視をすべて解除
         for task in notificationTimeoutTasks.values
         {
@@ -374,15 +369,29 @@ public final class BLEPeripheral: NSObject
         }
 
         notificationTimeoutTasks.removeAll()
+        notificationTimeoutIDs.removeAll()
 
         // 送信中フラグをすべて解除
         sendingCentrals.removeAll()
 
-        // 全接続の受信途中データと完成済み記録を破棄
+        // 受信状態を初期化
         messageAssembler.reset()
 
         // 購読デバイスをすべて削除
         subscribedCentrals.removeAll()
+
+        // 内部状態を初期化した後で失敗通知
+        for (centralID, messageIDs) in pendingMessages
+        {
+            for messageID in messageIDs
+            {
+                delegate?.peripheralDidFailToSend(
+                    messageID: messageID,
+                    to: centralID,
+                    error: BLESendError.disconnected
+                )
+            }
+        }
 
         print("BLE peripheral connections cleaned up")
     }
@@ -434,6 +443,7 @@ public final class BLEPeripheral: NSObject
             ) ?? []
 
             self.cancelNotificationTimeout(for: centralID)
+            self.sendingCentrals.remove(centralID)
 
             let messageIDs = Set(
                 failedItems.map { $0.messageID }
@@ -483,8 +493,6 @@ extension BLEPeripheral: @preconcurrency CBPeripheralManagerDelegate
             state = .unknown
         }
 
-        delegate?.peripheralDidUpdateState(state)
-
         if peripheral.state == .poweredOn
         {
             if advertisingRequested
@@ -505,6 +513,8 @@ extension BLEPeripheral: @preconcurrency CBPeripheralManagerDelegate
             // Bluetoothが使用できない場合は通信状態を破棄
             cleanupAllConnections()
         }
+        
+        delegate?.peripheralDidUpdateState(state)
     }
     
     public func peripheralManagerIsReady(toUpdateSubscribers peripheral: CBPeripheralManager)
@@ -638,8 +648,6 @@ extension BLEPeripheral: @preconcurrency CBPeripheralManagerDelegate
         delegate?.peripheralDidStartAdvertising()
     }
     
-    
-    
     public func peripheralManager(_ peripheral: CBPeripheralManager,
                                   central: CBCentral,
                                   didSubscribeTo characteristic: CBCharacteristic)
@@ -687,14 +695,6 @@ extension BLEPeripheral: @preconcurrency CBPeripheralManagerDelegate
             pendingItems.map { $0.messageID }
         )
         
-        for messageID in pendingMessageIDs {
-            delegate?.peripheralDidFailToSend(
-                messageID: messageID,
-                to: centralID,
-                error: BLESendError.disconnected
-            )
-        }
-
         print(
             "[BLEPeripheral] Unsubscribed pending messages:",
             pendingMessageIDs.count
@@ -707,6 +707,15 @@ extension BLEPeripheral: @preconcurrency CBPeripheralManagerDelegate
         sendingCentrals.remove(centralID)
 
         messageAssembler.reset(for: centralID)
+        
+        // 内部状態の初期化後に失敗通知
+        for messageID in pendingMessageIDs {
+            delegate?.peripheralDidFailToSend(
+                messageID: messageID,
+                to: centralID,
+                error: BLESendError.disconnected
+            )
+        }
 
         print("[BLEPeripheral] Message assembler reset:", centralID)
         

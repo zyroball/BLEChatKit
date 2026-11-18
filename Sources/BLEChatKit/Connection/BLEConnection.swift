@@ -36,11 +36,15 @@ public final class BLEConnection
         let deviceID = peripheral.identifier
 
         // 前回と同じ状態なら通知しない
-        if states[deviceID] == state {
+        if (states[deviceID] ?? .disconnected) == state {
             return
         }
 
-        states[deviceID] = state
+        if state == .disconnected {
+            states.removeValue(forKey: deviceID)
+        } else {
+            states[deviceID] = state
+        }
 
         delegate?.connectionDidChangeState(
             deviceID: deviceID,
@@ -56,5 +60,21 @@ public final class BLEConnection
 
         delegate?.connectionDidFail(deviceID: peripheral.identifier,
                                     error: error)
+    }
+    
+    func disconnectAll()
+    {
+        let activeDeviceIDs = states.compactMap { deviceID, state in
+            state != .disconnected ? deviceID : nil
+        }
+
+        states.removeAll()
+
+        for deviceID in activeDeviceIDs {
+            delegate?.connectionDidChangeState(
+                deviceID: deviceID,
+                state: .disconnected
+            )
+        }
     }
 }

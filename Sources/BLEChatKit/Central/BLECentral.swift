@@ -16,6 +16,7 @@ public final class BLECentral: NSObject
     public weak var delegate: BLECentralDelegate?
     private var centralManager: CBCentralManager!
     private var discoveredPeripherals:[UUID: CBPeripheral] = [:]
+    private var writeTimeoutIDs: [UUID: UUID] = [:]
     // 通知購読の設定処理中
     private var subscribingNotificationDevices = Set<UUID>()
     private var subscribingCharacteristics: [UUID: CBCharacteristic] = [:]
@@ -55,11 +56,11 @@ public final class BLECentral: NSObject
 
     public func startScan()
     {
-        guard centralManager.state == .poweredOn
-        else
-        {
-            return
-        }
+        guard centralManager.state == .poweredOn,
+                 !centralManager.isScanning
+           else {
+               return
+           }
         centralManager.scanForPeripherals(
             withServices: [BLEUUID.service],
             options: [
@@ -380,31 +381,59 @@ public func debugEnableNotification(for deviceID: UUID) {
                               type: .withResponse)
     }
 
-    private func cancelWriteTimeout(for deviceID: UUID)
-    {
+    private func cancelWriteTimeout(for deviceID: UUID) {
+
+        // タイムアウトタスクをキャンセル
         writeTimeoutTasks[deviceID]?.cancel()
+
+        // タスクの管理情報を削除
         writeTimeoutTasks.removeValue(forKey: deviceID)
+
+        // タイムアウトIDも無効化
+        writeTimeoutIDs.removeValue(forKey: deviceID)
     }
     
     private func startWriteTimeout(for deviceID: UUID) {
 
         cancelWriteTimeout(for: deviceID)
 
-        
-        let task = DispatchWorkItem { [weak self] in
+        // 今回のタイムアウトを識別するID
+        let timeoutID = UUID()
 
+        writeTimeoutIDs[deviceID] = timeoutID
+
+        let task = DispatchWorkItem { [weak self] in
             guard let self else { return }
+
+            // 古いタイムアウトタスクは処理しない
+            guard self.writeTimeoutIDs[deviceID] == timeoutID else {
+                return
+            }
+
+            guard let currentTask = self.writeTimeoutTasks[deviceID],
+                  !currentTask.isCancelled
+            else {
+                return
+            }
 
             guard self.writingDevices.contains(deviceID),
                   !self.disconnectingDevices.contains(deviceID)
             else {
                 return
             }
-
             print("BLE write timeout:", deviceID)
 
             // 切断処理中にする
             self.disconnectingDevices.insert(deviceID)
+
+            if let peripheral = self.discoveredPeripherals[deviceID] {
+                self.connection.updateState(
+                    for: peripheral,
+                    to: peripheral.state == .disconnected
+                        ? .disconnected
+                        : .disconnecting
+                )
+            }
 
             let error = NSError(
                 domain: "BLEChatKit",
@@ -427,10 +456,9 @@ public func debugEnableNotification(for deviceID: UUID) {
             // BLE接続を切断
             if let peripheral = self.discoveredPeripherals[deviceID],
                peripheral.state != .disconnected {
-
-                self.centralManager.cancelPeripheralConnection(
-                    peripheral
-                )
+                self.centralManager.cancelPeripheralConnection(peripheral)
+            } else {
+                self.disconnectingDevices.remove(deviceID)
             }
         }
 
@@ -466,6 +494,20 @@ extension BLECentral: @preconcurrency CBCentralManagerDelegate
             state = .poweredOn
         @unknown default:
             state = .unknown
+        }
+
+        if central.state != .poweredOn
+        {
+            let error = NSError(
+                domain: "BLEChatKit",
+                code: 1003,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "Bluetooth is unavailable."
+                ]
+            )
+
+            cleanupAllConnections(error: error)
         }
 
         delegate?.centralDidUpdateState(state)
@@ -506,10 +548,6 @@ extension BLECentral: @preconcurrency CBCentralManagerDelegate
             to: .connected
         )
 
-        // サービス探索状態を初期化
-        discoveringServiceDevices.remove(deviceID)
-        pendingServiceRediscoveryDevices.remove(deviceID)
-
         // サービス探索中として登録
         discoveringServiceDevices.insert(deviceID)
 
@@ -526,16 +564,38 @@ extension BLECentral: @preconcurrency CBCentralManagerDelegate
         print("BLE connected:", deviceID)
     }
 
+    public func centralManager(
+        _ central: CBCentralManager,
+        didFailToConnect peripheral: CBPeripheral,
+        error: Error?
+    ) {
+        let deviceID = peripheral.identifier
+        
+        // 接続失敗時は切断処理中の状態も解除
+        disconnectingDevices.remove(deviceID)
 
-    public func centralManager(_ central: CBCentralManager,
-                               didFailToConnect peripheral: CBPeripheral,
-                               error: Error?)
-    {
-        connection.notifyFailure(for: peripheral,
-                                 error: error)
+        // 接続失敗時のエラーを用意
+        let connectionError = error ?? NSError(
+            domain: "BLEChatKit",
+            code: 1004,
+            userInfo: [
+                NSLocalizedDescriptionKey:
+                    "BLE connection failed before sending completed."
+            ]
+        )
+
+        // 未送信メッセージを失敗通知して通信状態を解放
+        failPendingMessages(
+            for: deviceID,
+            error: connectionError
+        )
+
+        // 接続状態を切断済みに更新して失敗を通知
+        connection.notifyFailure(
+            for: peripheral,
+            error: connectionError
+        )
     }
-
-    
 
     public func centralManager(
         _ central: CBCentralManager,
@@ -581,19 +641,16 @@ extension BLECentral: @preconcurrency CBCentralManagerDelegate
                 ]
             )
 
-            print(
-                "[BLECentral] Pending send failed:",
-                disconnectError.localizedDescription
-            )
-
             failPendingMessages(
                 for: deviceID,
                 error: disconnectError
             )
+
+        } else {
+
+            // 未完了メッセージがない場合のみ直接クリア
+            cleanupConnection(for: deviceID)
         }
-        
-        // 送信待ちメッセージがなくても接続情報を破棄
-        cleanupConnection(for: deviceID)
 
         // 接続状態を更新
         connection.updateState(
@@ -615,6 +672,72 @@ extension BLECentral: @preconcurrency CBCentralManagerDelegate
         }
 
         delegate?.centralDidDisconnect(deviceID: deviceID)
+    }
+    
+    private func cleanupAllConnections(error: Error)
+    {
+        // 管理中のデバイスIDを収集
+        let deviceIDs = Set(
+            discoveredPeripherals.keys
+        ).union(
+            outgoingPacketQueue.allDeviceIDs
+        ).union(
+            writingDevices
+        ).union(
+            messageCharacteristics.keys
+        ).union(
+            writeTimeoutTasks.keys
+        ).union(
+            writeTimeoutIDs.keys
+        ).union(
+            disconnectingDevices
+        ).union(
+            subscribingNotificationDevices
+        ).union(
+            subscribingCharacteristics.keys
+        ).union(
+            discoveringServiceDevices
+        ).union(
+            pendingServiceRediscoveryDevices
+        ).union(
+            retryCounts.keys
+        )
+
+        // 失敗通知に必要な情報を先に退避
+        let pendingMessages = deviceIDs.map { deviceID in
+            (
+                deviceID,
+                outgoingPacketQueue.messageIDs(for: deviceID)
+            )
+        }
+
+        // Delegate通知より先に内部状態を解放
+        for deviceID in deviceIDs
+        {
+            cleanupConnection(for: deviceID)
+        }
+
+        // 受信途中のデータを破棄
+        messageAssembler.reset()
+
+        // 切断処理中の管理情報を初期化
+        disconnectingDevices.removeAll()
+
+        // 全デバイスの接続状態を切断済みに更新
+        connection.disconnectAll()
+
+        // 失敗通知
+        for (deviceID, messageIDs) in pendingMessages
+        {
+            for messageID in messageIDs
+            {
+                delegate?.centralDidFailToSend(
+                    messageID: messageID,
+                    to: deviceID,
+                    error: error
+                )
+            }
+        }
     }
 }
 
@@ -723,23 +846,23 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate
             {
                 print("BLE send failed:", deviceID, error)
 
-                // 切断処理中として登録
                 disconnectingDevices.insert(deviceID)
 
-                // キュー内の全メッセージに失敗通知
-                // 通知前に送信状態もクリアされる
-                failPendingMessages(for: deviceID,
-                                    error: error)
+                connection.updateState(
+                    for: peripheral,
+                    to: peripheral.state == .disconnected
+                        ? .disconnected
+                        : .disconnecting
+                )
+
+                failPendingMessages(for: deviceID, error: error)
 
                 // 接続状態を更新して切断
                 if peripheral.state != .disconnected {
-
-                    connection.updateState(for: peripheral,
-                                           to: .disconnecting)
-
                     centralManager.cancelPeripheralConnection(peripheral)
+                } else {
+                    disconnectingDevices.remove(deviceID)
                 }
-
                 return
             }
 
@@ -812,6 +935,7 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate
                 "[BLECentral] Service discovery failed:",
                 String(describing: error)
             )
+            delegate?.centralDidBecomeNotReady(deviceID: deviceID)
             return
         }
 
@@ -825,6 +949,17 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate
                 "[BLECentral] Service UUID:",
                 service.uuid
             )
+        }
+        
+        guard services.contains(where: {
+            $0.uuid == BLEUUID.service
+        }) else {
+            print("[BLECentral] BLEChatKit service not found:", deviceID)
+
+            delegate?.centralDidBecomeNotReady(
+                deviceID: deviceID
+            )
+            return
         }
         
         for service in services
@@ -843,14 +978,34 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate
         guard error == nil,
               let characteristics = service.characteristics
         else {
+            delegate?.centralDidBecomeNotReady(
+                deviceID: peripheral.identifier
+            )
             return
         }
 
         let deviceID = peripheral.identifier
+        guard characteristics.contains(where: {
+            $0.uuid == BLEUUID.message
+        }) else {
+            print("[BLECentral] Message characteristic not found:", deviceID)
+
+            delegate?.centralDidBecomeNotReady(
+                deviceID: deviceID
+            )
+            return
+        }
 
         for characteristic in characteristics
         where characteristic.uuid == BLEUUID.message {
 
+            guard characteristic.properties.contains(.notify),
+                  characteristic.properties.contains(.write)
+            else {
+                print("[BLECentral] Required properties not supported:", deviceID)
+                delegate?.centralDidBecomeNotReady(deviceID: deviceID)
+                continue
+            }
             // 現在のCharacteristicを記録
             messageCharacteristics[deviceID] = characteristic
 
@@ -892,12 +1047,11 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate
 
             // すでに通知購読済みなら再要求しない
             guard !characteristic.isNotifying else {
-
                 print(
                     "[BLECentral] Already notifying:",
                     deviceID
                 )
-
+                delegate?.centralDidBecomeReady(deviceID: deviceID)
                 continue
             }
 
