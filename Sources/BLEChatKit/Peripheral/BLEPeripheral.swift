@@ -378,11 +378,8 @@ public final class BLEPeripheral: NSObject
         // 送信中フラグをすべて解除
         sendingCentrals.removeAll()
 
-        // 受信途中の分割データを破棄
-        for centralID in subscribedCentrals.keys
-        {
-            messageAssembler.reset(for: centralID)
-        }
+        // 全接続の受信途中データと完成済み記録を破棄
+        messageAssembler.reset()
 
         // 購読デバイスをすべて削除
         subscribedCentrals.removeAll()

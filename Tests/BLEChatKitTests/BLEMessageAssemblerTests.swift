@@ -820,4 +820,38 @@ final class BLEMessageAssemblerTests: XCTestCase
         XCTAssertEqual(assembler.pendingMessageCount, 0)
         XCTAssertEqual(assembler.bufferedByteCount, 0)
     }
+    
+    
+    func testInconsistentTotalChunks() {
+
+        let assembler = BLEMessageAssembler()
+        let deviceID = UUID()
+        let messageID = UUID()
+
+        let first = BLEMessagePacket(
+            messageID: messageID,
+            chunkIndex: 0,
+            totalChunks: 3,
+            payload: Data("Hello".utf8)
+        )
+
+        let invalid = BLEMessagePacket(
+            messageID: messageID,
+            chunkIndex: 1,
+            totalChunks: 2,
+            payload: Data("World".utf8)
+        )
+
+        XCTAssertNil(assembler.append(first, from: deviceID))
+
+        XCTAssertEqual(assembler.pendingMessageCount, 1)
+
+        // 同じmessageIDなのに分割数が異なる
+        XCTAssertNil(assembler.append(invalid, from: deviceID))
+
+        // 不正なパケットによって既存バッファが増えない
+        XCTAssertEqual(assembler.pendingMessageCount, 1)
+        XCTAssertEqual(assembler.bufferedByteCount, 5)
+    }
+
 }

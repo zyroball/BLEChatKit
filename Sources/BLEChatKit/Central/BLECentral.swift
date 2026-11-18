@@ -304,7 +304,20 @@ public func debugEnableNotification(for deviceID: UUID) {
         sendNextPacket(to: deviceID)
     }
     
+    
     private func cleanupConnection(for deviceID: UUID) {
+
+        // 書き込みタイムアウトを解除
+        cancelWriteTimeout(for: deviceID)
+
+        // 未送信パケットを破棄
+        outgoingPacketQueue.clear(for: deviceID)
+
+        // 送信中フラグを解除
+        writingDevices.remove(deviceID)
+
+        // 再送回数をリセット
+        retryCounts.removeValue(forKey: deviceID)
 
         // Characteristicの情報を削除
         messageCharacteristics.removeValue(forKey: deviceID)
@@ -321,6 +334,7 @@ public func debugEnableNotification(for deviceID: UUID) {
         // 再探索待ち状態を解除
         pendingServiceRediscoveryDevices.remove(deviceID)
     }
+
     
     private func failPendingMessages(for deviceID: UUID,
                                      error: Error)
@@ -542,8 +556,10 @@ extension BLECentral: @preconcurrency CBCentralManagerDelegate
         // Characteristicを削除
         messageCharacteristics.removeValue(forKey: deviceID)
 
-        print("[BLECentral] Disconnected:", deviceID)
+        // 切断したデバイスの分割受信バッファを破棄
+        messageAssembler.reset(for: deviceID)
 
+        print("[BLECentral] Disconnected:", deviceID)
         // 未完了メッセージを確認
         let pendingMessageIDs =
             outgoingPacketQueue.messageIDs(for: deviceID)
@@ -575,6 +591,9 @@ extension BLECentral: @preconcurrency CBCentralManagerDelegate
                 error: disconnectError
             )
         }
+        
+        // 送信待ちメッセージがなくても接続情報を破棄
+        cleanupConnection(for: deviceID)
 
         // 接続状態を更新
         connection.updateState(
