@@ -17,9 +17,6 @@ public final class BLECentral: NSObject
         let deviceID: UUID
         let packets: [BLEOutgoingPacketQueue.OutgoingPacket]
         var retryCount: Int
-
-        // 初回の全チャンク送信完了通知済みか
-        var didNotifyWriteCompletion: Bool = false
     }
 
     private var pendingAcknowledgments:
@@ -1181,29 +1178,13 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate
 
             if packet.isLastChunk {
 
-                if var pending =
-                    pendingAcknowledgments[deviceID]?[packet.messageID] {
+                // 最終チャンクの書き込み完了後、ACK待機を開始
+                if pendingAcknowledgments[deviceID]?[packet.messageID] != nil {
 
-                    // 初回送信完了時だけ通知する
-                    if !pending.didNotifyWriteCompletion {
-
-                        pending.didNotifyWriteCompletion = true
-
-                        pendingAcknowledgments[deviceID]?[packet.messageID] = pending
-
-                        delegate?.centralDidFinishSending(
-                            messageID: packet.messageID,
-                            to: deviceID
-                        )
-                    }
-
-                    // 初回送信・再送ともにACK待機を開始
-                    if pendingAcknowledgments[deviceID]?[packet.messageID] != nil {
-                        startAcknowledgmentTimeout(
-                            messageID: packet.messageID,
-                            for: deviceID
-                        )
-                    }
+                    startAcknowledgmentTimeout(
+                        messageID: packet.messageID,
+                        for: deviceID
+                    )
                 }
             }
 
@@ -1550,6 +1531,12 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate
                 if pendingAcknowledgments[deviceID]?.isEmpty == true {
                     pendingAcknowledgments.removeValue(forKey: deviceID)
                 }
+                
+                // ACK受信をもって送信完了とする
+                delegate?.centralDidFinishSending(
+                    messageID: ack.messageID,
+                    to: deviceID
+                )
 
                 // ACK済みパケットの削除後、
                 // 書き込み中でなければ次のメッセージを送信
