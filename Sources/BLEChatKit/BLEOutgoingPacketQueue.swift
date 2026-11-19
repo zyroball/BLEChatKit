@@ -92,4 +92,44 @@ final class BLEOutgoingPacketQueue {
 
         return messageIDs
     }
+    
+    // MARK: - メッセージの送信待ち確認
+    func contains(
+        messageID: UUID,
+        for deviceID: UUID
+    ) -> Bool {
+
+        return queues[deviceID]?.contains {
+            $0.messageID == messageID
+        } ?? false
+    }
+    
+    // MARK: - メッセージ単位のキュー削除
+
+    func removePackets(
+        messageID: UUID,
+        for deviceID: UUID,
+        preservingFirstPacket: Bool = false
+    ) {
+        guard let queue = queues[deviceID] else {
+            return
+        }
+
+        let preservedPacket =
+            preservingFirstPacket ? queue.first : nil
+
+        var remainingPackets = queue.filter {
+            $0.messageID != messageID
+        }
+
+        if let preservedPacket {
+            remainingPackets.insert(preservedPacket, at: 0)
+        }
+
+        if remainingPackets.isEmpty {
+            queues.removeValue(forKey: deviceID)
+        } else {
+            queues[deviceID] = remainingPackets
+        }
+    }
 }

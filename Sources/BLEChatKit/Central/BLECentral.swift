@@ -17,6 +17,9 @@ public final class BLECentral: NSObject
         let deviceID: UUID
         let packets: [BLEOutgoingPacketQueue.OutgoingPacket]
         var retryCount: Int
+
+        // 初回の全チャンク送信完了通知済みか
+        var didNotifyWriteCompletion: Bool = false
     }
 
     private var pendingAcknowledgments:
@@ -413,25 +416,50 @@ public func debugEnableNotification(for deviceID: UUID) {
 
         // 再探索待ち状態を解除
         pendingServiceRediscoveryDevices.remove(deviceID)
+        
+        // ACKタイムアウトをすべて解除
+        if let tasks = acknowledgmentTimeoutTasks.removeValue(
+            forKey: deviceID
+        ) {
+            for task in tasks.values {
+                task.cancel()
+            }
+        }
+
+        // ACK待機中のメッセージ情報を削除
+        pendingAcknowledgments.removeValue(
+            forKey: deviceID
+        )
     }
 
     
-    private func failPendingMessages(for deviceID: UUID,
-                                     error: Error)
-    {
+    private func failPendingMessages(
+        for deviceID: UUID,
+        error: Error
+    ) {
+        // 送信キューに残っているメッセージ
+        let queuedMessageIDs =
+            outgoingPacketQueue.messageIDs(for: deviceID)
 
-        // 失敗対象のメッセージIDを先に確定
-        let messageIDs = outgoingPacketQueue.messageIDs(for: deviceID)
+        // ACK待機中のメッセージ
+        let pendingACKMessageIDs =
+            Array(pendingAcknowledgments[deviceID]?.keys ?? [:].keys)
 
-        // 通知前に送信状態をクリア
+        // 重複を除去
+        let messageIDs = Array(
+            Set(queuedMessageIDs).union(pendingACKMessageIDs)
+        )
+
+        // 古い送信状態をクリア
         cleanupConnection(for: deviceID)
 
-        // キューの状態が確定してから通知
+        // 未完了メッセージを失敗通知
         for messageID in messageIDs {
-
-            delegate?.centralDidFailToSend(messageID: messageID,
-                                           to: deviceID,
-                                           error: error)
+            delegate?.centralDidFailToSend(
+                messageID: messageID,
+                to: deviceID,
+                error: error
+            )
         }
     }
 
@@ -547,6 +575,60 @@ public func debugEnableNotification(for deviceID: UUID) {
                                       execute: task)
     }
     
+    // MARK: - ACK再送上限到達時の失敗処理
+
+    private func failPendingAcknowledgment(
+        messageID: UUID,
+        for deviceID: UUID
+    ) {
+        // ACKタイマーを解除
+        cancelAcknowledgmentTimeout(
+            messageID: messageID,
+            for: deviceID
+        )
+
+        // ACK待機状態を削除
+        guard pendingAcknowledgments[deviceID]?
+            .removeValue(forKey: messageID) != nil
+        else {
+            return
+        }
+
+        if pendingAcknowledgments[deviceID]?.isEmpty == true {
+            pendingAcknowledgments.removeValue(forKey: deviceID)
+        }
+
+        // 書き込み中の先頭パケットを保護
+        let isWritingMessage =
+            writingDevices.contains(deviceID) &&
+            outgoingPacketQueue.peek(for: deviceID)?.messageID
+                == messageID
+
+        outgoingPacketQueue.removePackets(
+            messageID: messageID,
+            for: deviceID,
+            preservingFirstPacket: isWritingMessage
+        )
+
+        let error = NSError(
+            domain: "BLEChatKit",
+            code: 1005,
+            userInfo: [
+                NSLocalizedDescriptionKey:
+                    "BLE acknowledgment retry limit reached."
+            ]
+        )
+
+        delegate?.centralDidFailToSend(
+            messageID: messageID,
+            to: deviceID,
+            error: error
+        )
+
+        // 別メッセージの送信を継続
+        sendNextPacket(to: deviceID)
+    }
+    
     private func retryPendingAcknowledgment(
         messageID: UUID,
         for deviceID: UUID
@@ -562,6 +644,12 @@ public func debugEnableNotification(for deviceID: UUID) {
                 "[BLECentral] ACK retry limit reached:",
                 messageID
             )
+
+            failPendingAcknowledgment(
+                messageID: messageID,
+                for: deviceID
+            )
+
             return
         }
 
@@ -577,6 +665,25 @@ public func debugEnableNotification(for deviceID: UUID) {
             return
         }
 
+        // 再送パケットがキューに残っている場合は
+        // 書き込み完了を待つ
+        guard !outgoingPacketQueue.contains(
+            messageID: messageID,
+            for: deviceID
+        ) else {
+            print(
+                "[BLECentral] ACK retry waiting for write completion:",
+                messageID
+            )
+
+            // 既存キューの送信を継続
+            sendNextPacket(to: deviceID)
+
+            // ACKタイマーはここでは再起動しない
+            // 最終チャンクの書き込み完了後に開始する
+            return
+        }
+        
         pending.retryCount += 1
 
         pendingAcknowledgments[deviceID]?[messageID] = pending
@@ -588,11 +695,13 @@ public func debugEnableNotification(for deviceID: UUID) {
             messageID
         )
 
+        // ACK未受信メッセージのパケットを再送キューへ登録
         outgoingPacketQueue.enqueue(
             pending.packets,
             for: deviceID
         )
 
+        // 送信開始（送信中なら何もしない）
         sendNextPacket(to: deviceID)
     }
 }
@@ -661,9 +770,35 @@ extension BLECentral: @preconcurrency CBCentralManagerDelegate
     {
         let deviceID = peripheral.identifier
 
-        // 再接続時に古い送受信状態をクリア
-        cleanupConnection(for: deviceID)
+        // 再接続時に未完了メッセージが残っているか確認
+        let queuedMessageIDs =
+            outgoingPacketQueue.messageIDs(for: deviceID)
 
+        let hasPendingACK =
+            !(pendingAcknowledgments[deviceID]?.isEmpty ?? true)
+
+        if !queuedMessageIDs.isEmpty || hasPendingACK {
+
+            let error = NSError(
+                domain: "BLEChatKit",
+                code: 1006,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "Pending messages remained when BLE reconnected."
+                ]
+            )
+
+            // 未完了メッセージを失敗通知して状態をクリア
+            failPendingMessages(
+                for: deviceID,
+                error: error
+            )
+
+        } else {
+
+            // 未完了メッセージがなければ通常の初期化
+            cleanupConnection(for: deviceID)
+        }
         // 切断処理中の状態を解除
         disconnectingDevices.remove(deviceID)
 
@@ -748,9 +883,19 @@ extension BLECentral: @preconcurrency CBCentralManagerDelegate
         messageAssembler.reset(for: deviceID)
 
         print("[BLECentral] Disconnected:", deviceID)
-        // 未完了メッセージを確認
-        let pendingMessageIDs =
+
+        // 送信キューに残っているメッセージ
+        let queuedMessageIDs =
             outgoingPacketQueue.messageIDs(for: deviceID)
+
+        // ACK待機中のメッセージ
+        let pendingACKMessageIDs =
+            Set(pendingAcknowledgments[deviceID]?.keys.map { $0 } ?? [])
+
+        // 未完了メッセージを重複なしで取得
+        let pendingMessageIDs = Array(
+            Set(queuedMessageIDs).union(pendingACKMessageIDs)
+        )
 
         print(
             "[BLECentral] Pending messages:",
@@ -832,15 +977,30 @@ extension BLECentral: @preconcurrency CBCentralManagerDelegate
         )
 
         // 失敗通知に必要な情報を先に退避
-        let pendingMessages = deviceIDs.map { deviceID in
-            (
-                deviceID,
+        // ACK待機中のデバイスも対象に含める
+        let allDeviceIDs = deviceIDs.union(
+            pendingAcknowledgments.keys
+        )
+
+        // 送信キューとACK待機中のメッセージを取得
+        let pendingMessages = allDeviceIDs.map { deviceID in
+
+            let queuedMessageIDs =
                 outgoingPacketQueue.messageIDs(for: deviceID)
+
+            let pendingACKMessageIDs =
+                pendingAcknowledgments[deviceID]?.keys.map { $0 } ?? []
+
+            // 重複を除去
+            let messageIDs = Array(
+                Set(queuedMessageIDs).union(pendingACKMessageIDs)
             )
+
+            return (deviceID, messageIDs)
         }
 
         // Delegate通知より先に内部状態を解放
-        for deviceID in deviceIDs
+        for deviceID in allDeviceIDs
         {
             cleanupConnection(for: deviceID)
         }
@@ -1020,18 +1180,30 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate
         writingDevices.remove(deviceID)
 
         if packet.isLastChunk {
-            // 全チャンクのATT書き込み完了
-            delegate?.centralDidFinishSending(
-                messageID: packet.messageID,
-                to: deviceID
-            )
 
-            // ACK待機中の場合のみタイマー開始
-            if pendingAcknowledgments[deviceID]?[packet.messageID] != nil {
-                startAcknowledgmentTimeout(
-                    messageID: packet.messageID,
-                    for: deviceID
-                )
+            if var pending =
+                pendingAcknowledgments[deviceID]?[packet.messageID] {
+
+                // 初回送信完了時だけ通知する
+                if !pending.didNotifyWriteCompletion {
+
+                    pending.didNotifyWriteCompletion = true
+
+                    pendingAcknowledgments[deviceID]?[packet.messageID] = pending
+
+                    delegate?.centralDidFinishSending(
+                        messageID: packet.messageID,
+                        to: deviceID
+                    )
+                }
+
+                // 初回送信・再送ともにACK待機を開始
+                if pendingAcknowledgments[deviceID]?[packet.messageID] != nil {
+                    startAcknowledgmentTimeout(
+                        messageID: packet.messageID,
+                        for: deviceID
+                    )
+                }
             }
         }
 
@@ -1357,6 +1529,20 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate
                     messageID: ack.messageID,
                     for: deviceID
                 )
+                
+                // 現在書き込み中のパケットがACK対象か確認
+                let isWritingAcknowledgedMessage =
+                    writingDevices.contains(deviceID) &&
+                    outgoingPacketQueue.peek(for: deviceID)?.messageID
+                        == ack.messageID
+
+                // ACK済みメッセージの未送信パケットを削除
+                // 書き込み中の先頭パケットだけは保持する
+                outgoingPacketQueue.removePackets(
+                    messageID: ack.messageID,
+                    for: deviceID,
+                    preservingFirstPacket: isWritingAcknowledgedMessage
+                )
 
                 pendingAcknowledgments[deviceID]?
                     .removeValue(forKey: ack.messageID)
@@ -1365,6 +1551,9 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate
                     pendingAcknowledgments.removeValue(forKey: deviceID)
                 }
 
+                // ACK済みパケットの削除後、
+                // 書き込み中でなければ次のメッセージを送信
+                sendNextPacket(to: deviceID)
                 return
             }
             // 分割パケットとしてデコード
