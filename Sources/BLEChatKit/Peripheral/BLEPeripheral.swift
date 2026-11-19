@@ -458,7 +458,9 @@ public final class BLEPeripheral: NSObject
             self.sendingCentrals.remove(centralID)
 
             let messageIDs = Set(
-                failedItems.map { $0.messageID }
+                failedItems
+                    .filter { $0.kind == .message }
+                    .map { $0.messageID }
             )
 
             for messageID in messageIDs {

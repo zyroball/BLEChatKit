@@ -218,7 +218,6 @@ public final class BLEMessageAssembler
             now.timeIntervalSince(date) < completedMessageRetention
         }
     }
-
     
     public func reset()
     {

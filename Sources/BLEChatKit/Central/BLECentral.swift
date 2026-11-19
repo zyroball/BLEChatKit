@@ -23,6 +23,9 @@ public final class BLECentral: NSObject
         [UUID: [UUID: PendingAcknowledgment]] = [:]
     private let messageAssembler = BLEMessageAssembler()
     public weak var delegate: BLECentralDelegate?
+    // ACK失敗通知後も書き込み中のパケットが残る場合に使用
+    // 同一メッセージの失敗通知重複を防止
+    private var failedMessageIDs: [UUID: Set<UUID>] = [:]
     private var centralManager: CBCentralManager!
     private var discoveredPeripherals:[UUID: CBPeripheral] = [:]
     private var writeTimeoutIDs: [UUID: UUID] = [:]
@@ -384,7 +387,6 @@ public func debugEnableNotification(for deviceID: UUID) {
         sendNextPacket(to: deviceID)
     }
     
-    
     private func cleanupConnection(for deviceID: UUID) {
 
         // 書き込みタイムアウトを解除
@@ -427,13 +429,13 @@ public func debugEnableNotification(for deviceID: UUID) {
         pendingAcknowledgments.removeValue(
             forKey: deviceID
         )
+        // 失敗通知済みメッセージIDを削除
+        failedMessageIDs.removeValue(forKey: deviceID)
     }
-
     
-    private func failPendingMessages(
-        for deviceID: UUID,
-        error: Error
-    ) {
+    private func failPendingMessages(for deviceID: UUID,
+                                     error: Error)
+    {
         // 送信キューに残っているメッセージ
         let queuedMessageIDs =
             outgoingPacketQueue.messageIDs(for: deviceID)
@@ -447,11 +449,23 @@ public func debugEnableNotification(for deviceID: UUID) {
             Set(queuedMessageIDs).union(pendingACKMessageIDs)
         )
 
+        // すでに失敗通知したメッセージを退避
+        let alreadyFailedIDs = failedMessageIDs[deviceID] ?? []
+
         // 古い送信状態をクリア
         cleanupConnection(for: deviceID)
 
-        // 未完了メッセージを失敗通知
+        // 未通知のメッセージだけ失敗通知
         for messageID in messageIDs {
+
+            guard !alreadyFailedIDs.contains(messageID) else {
+                print(
+                    "[BLECentral] Duplicate failure notification skipped:",
+                    messageID
+                )
+                continue
+            }
+
             delegate?.centralDidFailToSend(
                 messageID: messageID,
                 to: deviceID,
@@ -459,7 +473,6 @@ public func debugEnableNotification(for deviceID: UUID) {
             )
         }
     }
-
     
     private func sendNextPacket(to deviceID: UUID)
     {
@@ -573,11 +586,9 @@ public func debugEnableNotification(for deviceID: UUID) {
     }
     
     // MARK: - ACK再送上限到達時の失敗処理
-
-    private func failPendingAcknowledgment(
-        messageID: UUID,
-        for deviceID: UUID
-    ) {
+    private func failPendingAcknowledgment(messageID: UUID,
+                                           for deviceID: UUID)
+    {
         // ACKタイマーを解除
         cancelAcknowledgmentTimeout(
             messageID: messageID,
@@ -616,6 +627,11 @@ public func debugEnableNotification(for deviceID: UUID) {
             ]
         )
 
+        // 書き込み中のパケットが残る場合のみ失敗履歴を保持
+        if isWritingMessage {
+            failedMessageIDs[deviceID, default: []].insert(messageID)
+        }
+        // アプリ側へ失敗通知
         delegate?.centralDidFailToSend(
             messageID: messageID,
             to: deviceID,
@@ -857,11 +873,10 @@ extension BLECentral: @preconcurrency CBCentralManagerDelegate
         )
     }
 
-    public func centralManager(
-        _ central: CBCentralManager,
-        didDisconnectPeripheral peripheral: CBPeripheral,
-        error: Error?
-    ) {
+    public func centralManager(_ central: CBCentralManager,
+                               didDisconnectPeripheral peripheral: CBPeripheral,
+                               error: Error?)
+    {
         let deviceID = peripheral.identifier
 
         disconnectingDevices.remove(deviceID)
@@ -1099,98 +1114,114 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate
         ])
     }
     
-        public func peripheral(_ peripheral: CBPeripheral,
-                               didWriteValueFor characteristic: CBCharacteristic,
-                               error: Error?)
-        {
+    public func peripheral(_ peripheral: CBPeripheral,
+                           didWriteValueFor characteristic: CBCharacteristic,
+                           error: Error?)
+    {
 
-            guard characteristic.uuid == BLEUUID.message
+        guard characteristic.uuid == BLEUUID.message
+        else
+        {
+            return
+        }
+
+        let deviceID = peripheral.identifier
+
+        guard !disconnectingDevices.contains(deviceID),
+              writingDevices.contains(deviceID),
+              let packet = outgoingPacketQueue.peek(for: deviceID)
+        else {
+            return
+        }
+
+        // 書き込み応答を受信したのでタイマー解除
+        cancelWriteTimeout(for: deviceID)
+
+        // MARK: - 書き込み失敗
+        if let error {
+
+            let retryCount = retryCounts[deviceID] ?? 0
+            guard retryCount < maxRetryCount
             else
             {
-                return
-            }
+                print("BLE send failed:", deviceID, error)
 
-            let deviceID = peripheral.identifier
+                disconnectingDevices.insert(deviceID)
 
-            guard !disconnectingDevices.contains(deviceID),
-                  writingDevices.contains(deviceID),
-                  let packet = outgoingPacketQueue.peek(for: deviceID)
-            else {
-                return
-            }
+                connection.updateState(
+                    for: peripheral,
+                    to: peripheral.state == .disconnected
+                        ? .disconnected
+                        : .disconnecting
+                )
 
-            // 書き込み応答を受信したのでタイマー解除
-            cancelWriteTimeout(for: deviceID)
+                failPendingMessages(for: deviceID, error: error)
 
-            // MARK: - 書き込み失敗
-            if let error {
-
-                let retryCount = retryCounts[deviceID] ?? 0
-                guard retryCount < maxRetryCount
-                else
-                {
-                    print("BLE send failed:", deviceID, error)
-
-                    disconnectingDevices.insert(deviceID)
-
-                    connection.updateState(
-                        for: peripheral,
-                        to: peripheral.state == .disconnected
-                            ? .disconnected
-                            : .disconnecting
-                    )
-
-                    failPendingMessages(for: deviceID, error: error)
-
-                    // 接続状態を更新して切断
-                    if peripheral.state != .disconnected {
-                        centralManager.cancelPeripheralConnection(peripheral)
-                    } else {
-                        disconnectingDevices.remove(deviceID)
-                    }
-                    return
+                // 接続状態を更新して切断
+                if peripheral.state != .disconnected {
+                    centralManager.cancelPeripheralConnection(peripheral)
+                } else {
+                    disconnectingDevices.remove(deviceID)
                 }
-
-
-                retryCounts[deviceID] = retryCount + 1
-
-                print("BLE retry:",retryCount + 1,"/",maxRetryCount)
-
-                // 同じチャンクを再送
-                startWriteTimeout(for: deviceID)
-
-                peripheral.writeValue(packet.data,
-                                      for: characteristic,
-                                      type: .withResponse)
-
                 return
             }
 
-            // MARK: - 書き込み成功
 
-            retryCounts.removeValue(forKey: deviceID)
+            retryCounts[deviceID] = retryCount + 1
 
-            // 送信済みチャンクをキューから削除
-            outgoingPacketQueue.dequeue(for: deviceID)
+            print("BLE retry:",retryCount + 1,"/",maxRetryCount)
 
-            // 書き込み状態を解除
-            writingDevices.remove(deviceID)
+            // 同じチャンクを再送
+            startWriteTimeout(for: deviceID)
 
-            if packet.isLastChunk {
+            peripheral.writeValue(packet.data,
+                                  for: characteristic,
+                                  type: .withResponse)
 
-                // 最終チャンクの書き込み完了後、ACK待機を開始
-                if pendingAcknowledgments[deviceID]?[packet.messageID] != nil {
-
-                    startAcknowledgmentTimeout(
-                        messageID: packet.messageID,
-                        for: deviceID
-                    )
-                }
-            }
-
-            // 次のチャンクを送信
-            sendNextPacket(to: deviceID)
+            return
         }
+
+        // MARK: - 書き込み成功
+
+        retryCounts.removeValue(forKey: deviceID)
+
+        // 送信済みチャンクをキューから削除
+        outgoingPacketQueue.dequeue(for: deviceID)
+
+        // 書き込み状態を解除
+        writingDevices.remove(deviceID)
+
+        // ACK失敗済みメッセージの書き込みが完了した場合
+        if failedMessageIDs[deviceID]?.contains(packet.messageID) == true
+        {
+
+            // 失敗通知済みIDを削除
+            failedMessageIDs[deviceID]?.remove(packet.messageID)
+
+            // 空になった管理情報を削除
+            if failedMessageIDs[deviceID]?.isEmpty == true
+            {
+                failedMessageIDs.removeValue(forKey: deviceID)
+            }
+        }
+
+        if packet.isLastChunk
+        {
+
+            // 最終チャンクの書き込み完了後、ACK待機を開始
+            if pendingAcknowledgments[deviceID]?[packet.messageID] != nil
+            {
+
+                startAcknowledgmentTimeout(
+                    messageID: packet.messageID,
+                    for: deviceID
+                )
+            }
+        }
+
+        // 次のチャンクを送信
+        sendNextPacket(to: deviceID)
+    }
 
     public func peripheral(_ peripheral: CBPeripheral,
                            didDiscoverServices error: Error?)
