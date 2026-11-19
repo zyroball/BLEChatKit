@@ -195,10 +195,9 @@ public final class BLECentral: NSObject
         }
     }
     
-    private func startAcknowledgmentTimeout(
-        messageID: UUID,
-        for deviceID: UUID
-    ) {
+    private func startAcknowledgmentTimeout(messageID: UUID,
+                                            for deviceID: UUID)
+    {
         cancelAcknowledgmentTimeout(
             messageID: messageID,
             for: deviceID
@@ -642,10 +641,9 @@ public func debugEnableNotification(for deviceID: UUID) {
         sendNextPacket(to: deviceID)
     }
     
-    private func retryPendingAcknowledgment(
-        messageID: UUID,
-        for deviceID: UUID
-    ) {
+    private func retryPendingAcknowledgment(messageID: UUID,
+                                            for deviceID: UUID)
+    {
         guard var pending =
             pendingAcknowledgments[deviceID]?[messageID]
         else {

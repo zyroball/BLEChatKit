@@ -77,8 +77,8 @@ public final class BLEPeripheral: NSObject
         peripheralManager.stopAdvertising()
     }
 
-    private func setupService() {
-
+    private func setupService()
+    {
         guard peripheralManager.state == .poweredOn,
               !serviceReady,
               !serviceRegistrationInProgress
@@ -480,10 +480,9 @@ public final class BLEPeripheral: NSObject
         )
     }
     
-    func sendAcknowledgment(
-        messageID: UUID,
-        to centralID: UUID
-    ) throws {
+    func sendAcknowledgment(messageID: UUID,
+                            to centralID: UUID) throws
+    {
         guard let central = subscribedCentrals[centralID],
               let characteristic = messageCharacteristic
         else {
