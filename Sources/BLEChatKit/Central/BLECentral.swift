@@ -114,6 +114,7 @@ public final class BLECentral: NSObject
     
     public func disconnect(from deviceID: UUID)
     {
+        print("[BLECentral] Explicit disconnect requested:", deviceID)
         guard let peripheral = discoveredPeripherals[deviceID]
         else {
             return
