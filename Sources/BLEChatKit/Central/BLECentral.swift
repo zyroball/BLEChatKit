@@ -19,6 +19,10 @@ public final class BLECentral: NSObject
         var retryCount: Int
     }
     
+#if DEBUG
+private var simulateNotificationCallbackError = true
+#endif
+    
     private var pendingAcknowledgments:
         [UUID: [UUID: PendingAcknowledgment]] = [:]
     private let messageAssembler = BLEMessageAssembler()
@@ -1524,6 +1528,73 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate
     {
         let deviceID = peripheral.identifier
         
+#if DEBUG
+if simulateNotificationCallbackError,
+   error == nil,
+   characteristic.uuid == BLEUUID.message,
+   let currentCharacteristic = messageCharacteristics[deviceID],
+   currentCharacteristic === characteristic,
+   peripheral.state == .connected,
+   !disconnectingDevices.contains(deviceID) {
+
+    simulateNotificationCallbackError = false
+
+    print(
+        "[BLECentral] DEBUG: Injecting notification callback error:",
+        deviceID
+    )
+
+    let testError = NSError(
+        domain: "BLEChatKit.Debug",
+        code: 9003,
+        userInfo: [
+            NSLocalizedDescriptionKey:
+                "Simulated notification callback error."
+        ]
+    )
+
+    self.peripheral(
+        peripheral,
+        didUpdateNotificationStateFor: characteristic,
+        error: testError
+    )
+
+    return
+}
+#endif
+        
+        
+#if DEBUG
+if characteristic.uuid == BLEUUID.message,
+   let currentCharacteristic = messageCharacteristics[deviceID],
+   currentCharacteristic === characteristic,
+   peripheral.state == .connected,
+   !disconnectingDevices.contains(deviceID) {
+
+    print(
+        "[BLECentral] DEBUG: Testing notification error branch:",
+        deviceID
+    )
+
+    let testError = NSError(
+        domain: "BLEChatKit.Debug",
+        code: 9003,
+        userInfo: [
+            NSLocalizedDescriptionKey:
+                "Simulated notification callback error."
+        ]
+    )
+
+    self.peripheral(
+        peripheral,
+        didUpdateNotificationStateFor: characteristic,
+        error: testError
+    )
+
+    return
+}
+#endif
+        
         print("[BLECentral] Notification state updated:", deviceID)
         print("[BLECentral] Characteristic UUID:", characteristic.uuid)
         print("[BLECentral] Is notifying:", characteristic.isNotifying)
@@ -1586,18 +1657,16 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate
                 error
             )
 
-            if !characteristic.isNotifying {
-                failPendingMessages(
-                    for: deviceID,
-                    error: error
-                )
+            failPendingMessages(
+                for: deviceID,
+                error: error
+            )
 
-                delegate?.centralDidBecomeNotReady(
-                    deviceID: deviceID
-                )
+            delegate?.centralDidBecomeNotReady(
+                deviceID: deviceID
+            )
 
-                disconnectDueToError(from: deviceID)
-            }
+            disconnectDueToError(from: deviceID)
 
             return
         }
