@@ -226,23 +226,22 @@ extension BLEChatManager: BLECentralDelegate
 
         if !isCentralReady
         {
-
-            centralDeviceIDs.removeAll()
-            readyCentralDeviceIDs.removeAll()
-
-            // 接続中だったデバイスを切断状態へ変更
+            // 接続状態を更新する前にReadyを解除しない
             for deviceID in Array(connectionStates.keys)
             {
-
                 guard connectionStates[deviceID] != .disconnected
                 else {
                     continue
                 }
 
-                connectionDidChangeState(deviceID: deviceID,
-                                         state: .disconnected
+                connectionDidChangeState(
+                    deviceID: deviceID,
+                    state: .disconnected
                 )
             }
+
+            centralDeviceIDs.removeAll()
+            readyCentralDeviceIDs.removeAll()
         }
 
         delegate?.chatManagerDidUpdateBluetoothState(state)
@@ -333,10 +332,9 @@ extension BLEChatManager: BLECentralDelegate
 extension BLEChatManager: BLEConnectionDelegate
 {
     
-    public func connectionDidChangeState(
-        deviceID: UUID,
-        state: BLEConnectionState
-    ) {
+    public func connectionDidChangeState(deviceID: UUID,
+                                         state: BLEConnectionState)
+    {
         // 同じ状態なら通知しない
         guard (connectionStates[deviceID] ?? .disconnected) != state else {
             return
