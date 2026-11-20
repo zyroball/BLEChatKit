@@ -58,6 +58,10 @@ public final class BLECentral: NSObject
     
     private var writeTimeoutTasks: [UUID: DispatchWorkItem] = [:]
     private let writeTimeout: TimeInterval = 10
+    
+#if DEBUG
+private var simulateServiceDiscoveryError = true
+#endif
 
     public override init()
     {
@@ -411,6 +415,34 @@ public func debugEnableNotification(for deviceID: UUID) {
 
         // サービス探索状態を解除
         discoveringServiceDevices.remove(deviceID)
+        
+#if DEBUG
+if simulateServiceDiscoveryError {
+    simulateServiceDiscoveryError = false
+
+    let testError = NSError(
+        domain: "BLEChatKit.Debug",
+        code: 9001,
+        userInfo: [
+            NSLocalizedDescriptionKey:
+                "Simulated service discovery error."
+        ]
+    )
+
+    print("[BLECentral] DEBUG: Simulating service discovery error")
+
+    failPendingMessages(
+        for: deviceID,
+        error: testError
+    )
+
+    delegate?.centralDidBecomeNotReady(
+        deviceID: deviceID
+    )
+
+    return
+}
+#endif
 
         // 再探索待ち状態を解除
         pendingServiceRediscoveryDevices.remove(deviceID)
