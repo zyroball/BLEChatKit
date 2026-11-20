@@ -1556,28 +1556,45 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate
                 "[BLECentral] Notification error:",
                 error
             )
-            
-            // 通知購読状態を確認
+
             if !characteristic.isNotifying {
+                failPendingMessages(
+                    for: deviceID,
+                    error: error
+                )
+
                 delegate?.centralDidBecomeNotReady(
                     deviceID: deviceID
                 )
             }
-            
+
             return
         }
         
         guard characteristic.isNotifying else {
-            
             print(
                 "[BLECentral] Notification disabled:",
                 deviceID
             )
-            
+
+            let notificationError = NSError(
+                domain: "BLEChatKit",
+                code: 1012,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "BLEChatKit notification was disabled."
+                ]
+            )
+
+            failPendingMessages(
+                for: deviceID,
+                error: notificationError
+            )
+
             delegate?.centralDidBecomeNotReady(
                 deviceID: deviceID
             )
-            
+
             return
         }
         
