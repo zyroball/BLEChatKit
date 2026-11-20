@@ -178,14 +178,7 @@ public func debugEnableNotification(for deviceID: UUID) {
 extension BLEChatManager: BLECentralDelegate
 {
     public func centralDidDisconnect(deviceID: UUID) {
-
-        // Central側のReady状態を解除
-        readyCentralDeviceIDs.remove(deviceID)
-
-        // 接続デバイスの登録を解除
-        centralDeviceIDs.remove(deviceID)
-
-        // 接続状態の更新と通知は
+        // 接続状態とReady解除は
         // connectionDidChangeState に一本化する
     }
     
