@@ -60,7 +60,7 @@ public final class BLECentral: NSObject
     private let writeTimeout: TimeInterval = 10
     
 #if DEBUG
-private var simulateServiceDiscoveryError = true
+private var simulateServiceDiscoveryError = false
 #endif
 
     public override init()
