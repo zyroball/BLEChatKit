@@ -415,34 +415,6 @@ public func debugEnableNotification(for deviceID: UUID) {
 
         // サービス探索状態を解除
         discoveringServiceDevices.remove(deviceID)
-        
-#if DEBUG
-if simulateServiceDiscoveryError {
-    simulateServiceDiscoveryError = false
-
-    let testError = NSError(
-        domain: "BLEChatKit.Debug",
-        code: 9001,
-        userInfo: [
-            NSLocalizedDescriptionKey:
-                "Simulated service discovery error."
-        ]
-    )
-
-    print("[BLECentral] DEBUG: Simulating service discovery error")
-
-    failPendingMessages(
-        for: deviceID,
-        error: testError
-    )
-
-    delegate?.centralDidBecomeNotReady(
-        deviceID: deviceID
-    )
-
-    return
-}
-#endif
 
         // 再探索待ち状態を解除
         pendingServiceRediscoveryDevices.remove(deviceID)
@@ -1259,6 +1231,34 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate
 
         // サービス探索完了
         discoveringServiceDevices.remove(deviceID)
+        
+#if DEBUG
+if simulateServiceDiscoveryError {
+    simulateServiceDiscoveryError = false
+
+    let testError = NSError(
+        domain: "BLEChatKit.Debug",
+        code: 9001,
+        userInfo: [
+            NSLocalizedDescriptionKey:
+                "Simulated service discovery error."
+        ]
+    )
+
+    print("[BLECentral] DEBUG: Simulating service discovery error")
+
+    failPendingMessages(
+        for: deviceID,
+        error: testError
+    )
+
+    delegate?.centralDidBecomeNotReady(
+        deviceID: deviceID
+    )
+
+    return
+}
+#endif
 
         // 探索中にサービス変更が発生していた場合
         if pendingServiceRediscoveryDevices.remove(deviceID) != nil {
