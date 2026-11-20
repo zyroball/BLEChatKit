@@ -1563,38 +1563,6 @@ if simulateNotificationCallbackError,
 }
 #endif
         
-        
-#if DEBUG
-if characteristic.uuid == BLEUUID.message,
-   let currentCharacteristic = messageCharacteristics[deviceID],
-   currentCharacteristic === characteristic,
-   peripheral.state == .connected,
-   !disconnectingDevices.contains(deviceID) {
-
-    print(
-        "[BLECentral] DEBUG: Testing notification error branch:",
-        deviceID
-    )
-
-    let testError = NSError(
-        domain: "BLEChatKit.Debug",
-        code: 9003,
-        userInfo: [
-            NSLocalizedDescriptionKey:
-                "Simulated notification callback error."
-        ]
-    )
-
-    self.peripheral(
-        peripheral,
-        didUpdateNotificationStateFor: characteristic,
-        error: testError
-    )
-
-    return
-}
-#endif
-        
         print("[BLECentral] Notification state updated:", deviceID)
         print("[BLECentral] Characteristic UUID:", characteristic.uuid)
         print("[BLECentral] Is notifying:", characteristic.isNotifying)
