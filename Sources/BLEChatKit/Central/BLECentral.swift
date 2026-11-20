@@ -1044,10 +1044,9 @@ extension BLECentral: @preconcurrency CBCentralManagerDelegate
 extension BLECentral: @preconcurrency CBPeripheralDelegate
 {
 
-    public func peripheral(
-        _ peripheral: CBPeripheral,
-        didModifyServices invalidatedServices: [CBService]
-    ) {
+    public func peripheral(_ peripheral: CBPeripheral,
+                           didModifyServices invalidatedServices: [CBService])
+    {
         let deviceID = peripheral.identifier
 
         print(
@@ -1275,9 +1274,24 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate
         }) else {
             print("[BLECentral] BLEChatKit service not found:", deviceID)
 
+            let serviceError = NSError(
+                domain: "BLEChatKit",
+                code: 1007,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "BLEChatKit service was not found."
+                ]
+            )
+
+            failPendingMessages(
+                for: deviceID,
+                error: serviceError
+            )
+
             delegate?.centralDidBecomeNotReady(
                 deviceID: deviceID
             )
+
             return
         }
         
