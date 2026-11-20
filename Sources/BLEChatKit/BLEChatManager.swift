@@ -65,6 +65,12 @@ public final class BLEChatManager
             peripheral.startAdvertising()
         }
     }
+    
+#if DEBUG
+public func debugSetAcknowledgmentEnabled(_ enabled: Bool) {
+    peripheral.debugSetAcknowledgmentEnabled(enabled)
+}
+#endif
 
     /// BLEデバイスのスキャンと広告を停止する。
     ///

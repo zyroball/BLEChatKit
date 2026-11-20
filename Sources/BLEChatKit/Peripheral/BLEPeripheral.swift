@@ -23,6 +23,10 @@ public final class BLEPeripheral: NSObject
         let kind: NotificationKind
     }
     
+#if DEBUG
+private var debugAcknowledgmentEnabled = true
+#endif
+    
     private let messageAssembler = BLEMessageAssembler()
     private var notificationQueues: [UUID: [NotificationItem]] = [:]
     private var sendingCentrals: Set<UUID> = []
@@ -480,9 +484,26 @@ public final class BLEPeripheral: NSObject
         )
     }
     
+#if DEBUG
+public func debugSetAcknowledgmentEnabled(_ enabled: Bool) {
+    debugAcknowledgmentEnabled = enabled
+
+    print(
+        "[BLEPeripheral] DEBUG ACK enabled:",
+        enabled
+    )
+}
+#endif
+    
     func sendAcknowledgment(messageID: UUID,
                             to centralID: UUID) throws
     {
+#if DEBUG
+guard debugAcknowledgmentEnabled else {
+    print("[BLEPeripheral] DEBUG ACK suppressed:", messageID)
+    return
+}
+#endif
         guard let central = subscribedCentrals[centralID],
               let characteristic = messageCharacteristic
         else {
