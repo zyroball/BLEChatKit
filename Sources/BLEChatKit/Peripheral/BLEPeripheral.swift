@@ -44,6 +44,11 @@ private var debugAcknowledgmentEnabled = true
     private var serviceRegistrationInProgress = false
     private var serviceReady = false
     private var advertisingRequested = false
+    private var advertisementLocalName: String?
+    
+    public func setAdvertisementLocalName(_ name: String?) {
+        advertisementLocalName = name
+    }
 
     public override init()
     {
@@ -124,11 +129,18 @@ private var debugAcknowledgmentEnabled = true
             return
         }
 
-        peripheralManager.startAdvertising([
+        var advertisementData: [String: Any] = [
             CBAdvertisementDataServiceUUIDsKey: [
                 BLEUUID.service
             ]
-        ])
+        ]
+
+        if let localName = advertisementLocalName,
+           !localName.isEmpty {
+            advertisementData[CBAdvertisementDataLocalNameKey] = localName
+        }
+
+        peripheralManager.startAdvertising(advertisementData)
     }
     
     

@@ -144,6 +144,10 @@ public func debugSetAcknowledgmentEnabled(_ enabled: Bool) {
         return false
     }
     
+    public func setAdvertisementLocalName(_ name: String?) {
+        peripheral.setAdvertisementLocalName(name)
+    }
+    
     /// Central側のBLE接続状態を取得する。
     ///
     /// Peripheral側の購読状態は含まない。
