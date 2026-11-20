@@ -733,6 +733,12 @@ final class BLEMessageAssemblerTests: XCTestCase
             Data("Hello".utf8)
         )
 
+        // 完成済みMessage IDを登録
+        assembler.markMessageCompleted(
+            messageID: messageID,
+            from: deviceID
+        )
+        
         // 同じメッセージを再受信
         XCTAssertNil(
             assembler.append(packet, from: deviceID)
@@ -748,6 +754,7 @@ final class BLEMessageAssemblerTests: XCTestCase
     func testCompletedMessageTimeout() {
 
         let assembler = BLEMessageAssembler()
+
         let deviceID = UUID()
         let messageID = UUID()
 
@@ -769,20 +776,25 @@ final class BLEMessageAssemblerTests: XCTestCase
             Data("Hello".utf8)
         )
 
-        // 30秒以内の重複は拒否
-        currentDate = startDate.addingTimeInterval(29)
+        // 完成済みMessage IDを登録
+        assembler.markMessageCompleted(
+            messageID: messageID,
+            from: deviceID
+        )
+
+        // 299秒後：重複受信を拒否
+        currentDate = startDate.addingTimeInterval(299)
 
         XCTAssertNil(
             assembler.append(packet, from: deviceID)
         )
 
-        // 30秒経過
-        currentDate = startDate.addingTimeInterval(30)
+        // 300秒後：保持期限に到達
+        currentDate = startDate.addingTimeInterval(300)
 
         assembler.removeExpiredMessages()
 
-        // 重複防止記録が期限切れになり、
-        // 同じIDのメッセージを再び受け付ける
+        // 完成済み履歴が削除され、再び復元できる
         XCTAssertEqual(
             assembler.append(packet, from: deviceID),
             Data("Hello".utf8)

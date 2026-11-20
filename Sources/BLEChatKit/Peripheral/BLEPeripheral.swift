@@ -387,7 +387,7 @@ public final class BLEPeripheral: NSObject
         sendingCentrals.removeAll()
 
         // 受信状態を初期化
-        messageAssembler.reset()
+        messageAssembler.resetAllPendingMessages()
 
         // 購読デバイスをすべて削除
         subscribedCentrals.removeAll()
@@ -597,7 +597,6 @@ extension BLEPeripheral: @preconcurrency CBPeripheralManagerDelegate
         }
     }
 
-
     public func peripheralManager(_ peripheral: CBPeripheralManager,
                                   didReceiveWrite requests: [CBATTRequest])
     {
@@ -801,7 +800,7 @@ extension BLEPeripheral: @preconcurrency CBPeripheralManagerDelegate
         // 送信中フラグを解除
         sendingCentrals.remove(centralID)
 
-        messageAssembler.reset(for: centralID)
+        messageAssembler.resetPendingMessages(for: centralID)
         
         // 内部状態の初期化後に失敗通知
         for messageID in pendingMessageIDs {

@@ -286,4 +286,31 @@ public final class BLEMessageAssembler
             }
         }
     }
+    
+    public func resetPendingMessages(for deviceID: UUID) {
+        lock.lock()
+        defer {
+            lock.unlock()
+        }
+
+        // 未完成の受信バッファだけ削除
+        buffers = buffers.filter { key, _ in
+            key.deviceID != deviceID
+        }
+
+        // 完成済みMessage IDは保持する
+        // completedMessagesは変更しない
+    }
+    
+    public func resetAllPendingMessages() {
+        lock.lock()
+        defer {
+            lock.unlock()
+        }
+
+        // 未完成メッセージだけを破棄
+        buffers.removeAll()
+
+        // 完成済みMessage IDは保持
+    }
 }

@@ -890,7 +890,7 @@ extension BLECentral: @preconcurrency CBCentralManagerDelegate
         messageCharacteristics.removeValue(forKey: deviceID)
 
         // 切断したデバイスの分割受信バッファを破棄
-        messageAssembler.reset(for: deviceID)
+        messageAssembler.resetPendingMessages(for: deviceID)
 
         print("[BLECentral] Disconnected:", deviceID)
 
@@ -1016,7 +1016,7 @@ extension BLECentral: @preconcurrency CBCentralManagerDelegate
         }
 
         // 受信途中のデータを破棄
-        messageAssembler.reset()
+        messageAssembler.resetAllPendingMessages()
 
         // 切断処理中の管理情報を初期化
         disconnectingDevices.removeAll()

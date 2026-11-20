@@ -354,6 +354,12 @@ final class BLEChatKitTests: XCTestCase
             firstResult,
             Data("Hello BLE".utf8)
         )
+        
+        // メッセージの完成を記録
+        assembler.markMessageCompleted(
+            messageID: messageID,
+            from: deviceID
+        )
 
         // 2回目：同じMessage IDで再受信
         let secondResult = assembler.append(
@@ -365,7 +371,7 @@ final class BLEChatKitTests: XCTestCase
         XCTAssertNil(secondResult)
     }
     
-    func testCompletedMessageExpiresAfter30Seconds() {
+    func testCompletedMessageExpiresAfter300Seconds() {
 
         let assembler = BLEMessageAssembler()
 
@@ -396,8 +402,14 @@ final class BLEChatKitTests: XCTestCase
             Data("Hello BLE".utf8)
         )
 
-        // 29秒：同じMessage IDは重複として無視
-        currentDate = currentDate.addingTimeInterval(29)
+        // 完成済みMessage IDを登録
+        assembler.markMessageCompleted(
+            messageID: messageID,
+            from: deviceID
+        )
+
+        // 299秒：重複メッセージとして無視
+        currentDate = currentDate.addingTimeInterval(299)
 
         let duplicateResult = assembler.append(
             packet,
@@ -406,7 +418,7 @@ final class BLEChatKitTests: XCTestCase
 
         XCTAssertNil(duplicateResult)
 
-        // 30秒：完成済み履歴が期限切れ
+        // 300秒：完成済み履歴が期限切れ
         currentDate = currentDate.addingTimeInterval(1)
 
         let expiredResult = assembler.append(
@@ -414,7 +426,7 @@ final class BLEChatKitTests: XCTestCase
             from: deviceID
         )
 
-        // 履歴が削除されたので再び復元される
+        // 履歴が削除され、再び復元できる
         XCTAssertEqual(
             expiredResult,
             Data("Hello BLE".utf8)
@@ -562,6 +574,12 @@ final class BLEChatKitTests: XCTestCase
             firstResult,
             Data("Hello BLE".utf8)
         )
+        
+        // 完成済みMessage IDを登録
+        assembler.markMessageCompleted(
+            messageID: messageID,
+            from: deviceID
+        )
 
         // 同じMessage IDは重複として無視
         let duplicateResult = assembler.append(
@@ -686,6 +704,17 @@ final class BLEChatKitTests: XCTestCase
             Data("Device B".utf8)
         )
 
+        // 両デバイスの完成済みMessage IDを登録
+        assembler.markMessageCompleted(
+            messageID: messageA,
+            from: deviceA
+        )
+
+        assembler.markMessageCompleted(
+            messageID: messageB,
+            from: deviceB
+        )
+        
         // 完成済みなので重複受信を無視
         XCTAssertNil(
             assembler.append(packetA, from: deviceA)
@@ -1102,6 +1131,18 @@ final class BLEChatKitTests: XCTestCase
         XCTAssertEqual(
             assembler.append(packet, from: deviceB),
             Data("Hello BLE".utf8)
+        )
+        
+        // Device Aの完成済みMessage IDを登録
+        assembler.markMessageCompleted(
+            messageID: messageID,
+            from: deviceA
+        )
+
+        // Device Bの完成済みMessage IDを登録
+        assembler.markMessageCompleted(
+            messageID: messageID,
+            from: deviceB
         )
 
         // デバイスAだけリセット
@@ -1755,6 +1796,12 @@ final class BLEChatKitTests: XCTestCase
             assembler.append(packet, from: deviceA),
             Data("Hello BLE".utf8)
         )
+        
+        // Device Aの完成済みMessage IDを登録
+        assembler.markMessageCompleted(
+            messageID: messageID,
+            from: deviceA
+        )
 
         // デバイスA：重複受信は拒否
         XCTAssertNil(
@@ -1765,6 +1812,12 @@ final class BLEChatKitTests: XCTestCase
         XCTAssertEqual(
             assembler.append(packet, from: deviceB),
             Data("Hello BLE".utf8)
+        )
+        
+        // Device Bの完成済みMessage IDを登録
+        assembler.markMessageCompleted(
+            messageID: messageID,
+            from: deviceB
         )
 
         // デバイスB：重複受信は拒否
