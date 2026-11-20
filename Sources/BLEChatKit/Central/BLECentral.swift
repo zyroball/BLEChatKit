@@ -235,6 +235,35 @@ public final class BLECentral: NSObject
         acknowledgmentTimeoutTasks[deviceID, default: [:]][messageID] = task
     }
     
+    private func disconnectDueToError(from deviceID: UUID)
+    {
+        guard let peripheral = discoveredPeripherals[deviceID] else {
+            return
+        }
+
+        guard connection.state(for: deviceID) == .connected else {
+            return
+        }
+
+        guard !disconnectingDevices.contains(deviceID) else {
+            return
+        }
+
+        print(
+            "[BLECentral] Disconnecting due to internal error:",
+            deviceID
+        )
+
+        disconnectingDevices.insert(deviceID)
+
+        connection.updateState(
+            for: peripheral,
+            to: .disconnecting
+        )
+
+        centralManager.cancelPeripheralConnection(peripheral)
+    }
+    
 #if DEBUG
 public func debugDisableNotification(for deviceID: UUID) {
 
@@ -1566,6 +1595,8 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate
                 delegate?.centralDidBecomeNotReady(
                     deviceID: deviceID
                 )
+
+                disconnectDueToError(from: deviceID)
             }
 
             return
@@ -1595,6 +1626,7 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate
                 deviceID: deviceID
             )
 
+            disconnectDueToError(from: deviceID)
             return
         }
         
