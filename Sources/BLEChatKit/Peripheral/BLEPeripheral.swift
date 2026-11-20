@@ -368,10 +368,13 @@ private var debugAcknowledgmentEnabled = true
         // 失敗通知に必要な情報を退避
         let pendingMessages = notificationQueues.map {
             (centralID, items) in
-
             (
                 centralID,
-                Set(items.map { $0.messageID })
+                Set(
+                    items
+                        .filter { $0.kind == .message }
+                        .map { $0.messageID }
+                )
             )
         }
 
@@ -593,7 +596,8 @@ extension BLEPeripheral: @preconcurrency CBPeripheralManagerDelegate
         delegate?.peripheralDidUpdateState(state)
     }
     
-    public func peripheralManagerIsReady(toUpdateSubscribers peripheral: CBPeripheralManager)
+    public func peripheralManagerIsReady(toUpdateSubscribers
+                                         peripheral: CBPeripheralManager)
     {
         guard let characteristic = messageCharacteristic
         else
@@ -807,7 +811,9 @@ extension BLEPeripheral: @preconcurrency CBPeripheralManagerDelegate
 
         // 未送信メッセージIDを取得
         let pendingMessageIDs = Set(
-            pendingItems.map { $0.messageID }
+            pendingItems
+                .filter { $0.kind == .message }
+                .map { $0.messageID }
         )
         
         print(

@@ -434,9 +434,8 @@ extension BLEChatManager: BLEPeripheralDelegate
            onSendFailed?(nil, centralID, error)
     }
     
-    public func peripheralDidSubscribe(
-        centralID: UUID
-    ) {
+    public func peripheralDidSubscribe(centralID: UUID)
+    {
         let wasReady = isReady(for: centralID)
 
         let inserted = peripheralCentralIDs.insert(centralID).inserted
