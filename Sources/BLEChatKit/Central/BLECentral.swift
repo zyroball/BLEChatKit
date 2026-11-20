@@ -19,10 +19,6 @@ public final class BLECentral: NSObject
         var retryCount: Int
     }
     
-#if DEBUG
-private var simulateNotificationError = true
-#endif
-
     private var pendingAcknowledgments:
         [UUID: [UUID: PendingAcknowledgment]] = [:]
     private let messageAssembler = BLEMessageAssembler()
@@ -1527,39 +1523,6 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate
                            error: Error?)
     {
         let deviceID = peripheral.identifier
-        
-#if DEBUG
-if simulateNotificationError {
-    simulateNotificationError = false
-
-    print(
-        "[BLECentral] DEBUG: Simulating notification error:",
-        deviceID
-    )
-
-    let testError = NSError(
-        domain: "BLEChatKit.Debug",
-        code: 9002,
-        userInfo: [
-            NSLocalizedDescriptionKey:
-                "Simulated notification error."
-        ]
-    )
-
-    failPendingMessages(
-        for: deviceID,
-        error: testError
-    )
-
-    delegate?.centralDidBecomeNotReady(
-        deviceID: deviceID
-    )
-
-    disconnectDueToError(from: deviceID)
-
-    return
-}
-#endif
         
         print("[BLECentral] Notification state updated:", deviceID)
         print("[BLECentral] Characteristic UUID:", characteristic.uuid)
