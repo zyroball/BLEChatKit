@@ -59,10 +59,6 @@ public final class BLECentral: NSObject
     private var writeTimeoutTasks: [UUID: DispatchWorkItem] = [:]
     private let writeTimeout: TimeInterval = 10
     
-#if DEBUG
-private var simulateServiceDiscoveryError = false
-#endif
-
     public override init()
     {
         super.init()
@@ -1231,34 +1227,6 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate
 
         // サービス探索完了
         discoveringServiceDevices.remove(deviceID)
-        
-#if DEBUG
-if simulateServiceDiscoveryError {
-    simulateServiceDiscoveryError = false
-
-    let testError = NSError(
-        domain: "BLEChatKit.Debug",
-        code: 9001,
-        userInfo: [
-            NSLocalizedDescriptionKey:
-                "Simulated service discovery error."
-        ]
-    )
-
-    print("[BLECentral] DEBUG: Simulating service discovery error")
-
-    failPendingMessages(
-        for: deviceID,
-        error: testError
-    )
-
-    delegate?.centralDidBecomeNotReady(
-        deviceID: deviceID
-    )
-
-    return
-}
-#endif
 
         // 探索中にサービス変更が発生していた場合
         if pendingServiceRediscoveryDevices.remove(deviceID) != nil {
@@ -1360,9 +1328,31 @@ if simulateServiceDiscoveryError {
         guard error == nil,
               let characteristics = service.characteristics
         else {
-            delegate?.centralDidBecomeNotReady(
-                deviceID: peripheral.identifier
+            let deviceID = peripheral.identifier
+
+            print(
+                "[BLECentral] Characteristic discovery failed:",
+                String(describing: error)
             )
+
+            let discoveryError = error ?? NSError(
+                domain: "BLEChatKit",
+                code: 1009,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "BLEChatKit characteristic discovery failed."
+                ]
+            )
+
+            failPendingMessages(
+                for: deviceID,
+                error: discoveryError
+            )
+
+            delegate?.centralDidBecomeNotReady(
+                deviceID: deviceID
+            )
+
             return
         }
 
@@ -1372,9 +1362,24 @@ if simulateServiceDiscoveryError {
         }) else {
             print("[BLECentral] Message characteristic not found:", deviceID)
 
+            let characteristicError = NSError(
+                domain: "BLEChatKit",
+                code: 1010,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "BLEChatKit message characteristic was not found."
+                ]
+            )
+
+            failPendingMessages(
+                for: deviceID,
+                error: characteristicError
+            )
+
             delegate?.centralDidBecomeNotReady(
                 deviceID: deviceID
             )
+
             return
         }
 
@@ -1384,9 +1389,30 @@ if simulateServiceDiscoveryError {
             guard characteristic.properties.contains(.notify),
                   characteristic.properties.contains(.write)
             else {
-                print("[BLECentral] Required properties not supported:", deviceID)
-                delegate?.centralDidBecomeNotReady(deviceID: deviceID)
-                continue
+                print(
+                    "[BLECentral] Required properties not supported:",
+                    deviceID
+                )
+
+                let propertyError = NSError(
+                    domain: "BLEChatKit",
+                    code: 1011,
+                    userInfo: [
+                        NSLocalizedDescriptionKey:
+                            "BLEChatKit required characteristic properties are not supported."
+                    ]
+                )
+
+                failPendingMessages(
+                    for: deviceID,
+                    error: propertyError
+                )
+
+                delegate?.centralDidBecomeNotReady(
+                    deviceID: deviceID
+                )
+
+                return
             }
             // 現在のCharacteristicを記録
             messageCharacteristics[deviceID] = characteristic
