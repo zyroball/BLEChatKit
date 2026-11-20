@@ -116,7 +116,8 @@ public func debugSetAcknowledgmentEnabled(_ enabled: Bool) {
     
     @discardableResult
     public func send(_ message: String,
-                     to deviceID: UUID) throws -> Bool
+                     to deviceID: UUID,
+                     messageID: UUID = UUID()) throws -> Bool
     {
         let canSendAsCentral =
             readyCentralDeviceIDs.contains(deviceID)
@@ -129,7 +130,11 @@ public func debugSetAcknowledgmentEnabled(_ enabled: Bool) {
         if canSendAsCentral
         {
             print("[BLEChatKit] Central chunked send:", deviceID)
-            try central.sendChunked(message, to: deviceID)
+            try central.sendChunked(
+                message,
+                to: deviceID,
+                messageID: messageID
+            )
 
             return true
         }
@@ -137,7 +142,11 @@ public func debugSetAcknowledgmentEnabled(_ enabled: Bool) {
         // Peripheral側の通知送信
         if canSendAsPeripheral
         {
-            return try peripheral.send(message,to: deviceID)
+            return try peripheral.send(
+                message,
+                to: deviceID,
+                messageID: messageID
+            )
         }
 
         // 送信できる経路がない

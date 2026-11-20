@@ -146,7 +146,8 @@ private var debugAcknowledgmentEnabled = true
     
     @discardableResult
     public func send(_ message: String,
-                     to centralID: UUID) throws -> Bool
+                     to centralID: UUID,
+                     messageID: UUID = UUID()) throws -> Bool
     {
         guard peripheralManager.state == .poweredOn,
               messageCharacteristic != nil,
@@ -156,14 +157,18 @@ private var debugAcknowledgmentEnabled = true
         }
 
         // 通常メッセージも分割送信処理へ統一
-        try sendChunked(message,
-                        to: centralID)
+        try sendChunked(
+            message,
+            to: centralID,
+            messageID: messageID
+        )
 
         return true
     }
 
     public func sendChunked(_ message: String,
-                            to centralID: UUID) throws
+                            to centralID: UUID,
+                            messageID: UUID = UUID()) throws
     {
         guard let central = subscribedCentrals[centralID],
               let characteristic = messageCharacteristic
@@ -183,8 +188,10 @@ private var debugAcknowledgmentEnabled = true
             throw BLETransportError.messageTooLarge
         }
 
-        let packets = try BLEMessagePacketBuilder.build(message: message,
-                                                        chunkSize: chunkSize
+        let packets = try BLEMessagePacketBuilder.build(
+            message: message,
+            chunkSize: chunkSize,
+            messageID: messageID
         )
         
         guard let messageID = packets.first?.messageID else {

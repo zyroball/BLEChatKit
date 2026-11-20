@@ -323,7 +323,8 @@ public func debugEnableNotification(for deviceID: UUID) {
     
     
     public func preparePackets(_ message: String,
-                               to deviceID: UUID) throws -> [BLEMessagePacket]
+                               to deviceID: UUID,
+                               messageID: UUID = UUID()) throws -> [BLEMessagePacket]
     {
         guard let peripheral = discoveredPeripherals[deviceID],
               peripheral.state == .connected,
@@ -346,8 +347,11 @@ public func debugEnableNotification(for deviceID: UUID) {
             throw BLETransportError.messageTooLarge
         }
 
-        let packets = try BLEMessagePacketBuilder.build(message: message,
-                                                        chunkSize: chunkSize)
+        let packets = try BLEMessagePacketBuilder.build(
+            message: message,
+            chunkSize: chunkSize,
+            messageID: messageID
+        )
 
         // 実際に送信可能なサイズか検証
         for packet in packets
@@ -365,7 +369,8 @@ public func debugEnableNotification(for deviceID: UUID) {
     }
     
     public func sendChunked(_ message: String,
-                            to deviceID: UUID) throws
+                            to deviceID: UUID,
+                            messageID: UUID = UUID()) throws
     {
 
         guard let peripheral = discoveredPeripherals[deviceID],
@@ -378,7 +383,8 @@ public func debugEnableNotification(for deviceID: UUID) {
 
         let packets = try preparePackets(
             message,
-            to: deviceID
+            to: deviceID,
+            messageID: messageID
         )
 
         print(
