@@ -69,7 +69,6 @@ public final class BLECentral: NSObject
         )
     }
 
-
     public func startScan()
     {
         guard centralManager.state == .poweredOn,
@@ -1290,11 +1289,10 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate
         }
     }
 
-    public func peripheral(
-        _ peripheral: CBPeripheral,
-        didDiscoverCharacteristicsFor service: CBService,
-        error: Error?
-    ) {
+    public func peripheral(_ peripheral: CBPeripheral,
+                           didDiscoverCharacteristicsFor service: CBService,
+                           error: Error?)
+    {
         guard error == nil,
               let characteristics = service.characteristics
         else {
@@ -1371,7 +1369,17 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate
                     "[BLECentral] Already notifying:",
                     deviceID
                 )
-                delegate?.centralDidBecomeReady(deviceID: deviceID)
+
+                if peripheral.state == .connected,
+                   !disconnectingDevices.contains(deviceID) {
+                    delegate?.centralDidBecomeReady(deviceID: deviceID)
+                } else {
+                    print(
+                        "[BLECentral] Ready skipped (disconnected):",
+                        deviceID
+                    )
+                }
+
                 continue
             }
 
@@ -1391,12 +1399,10 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate
         }
     }
     
-    
-    public func peripheral(
-        _ peripheral: CBPeripheral,
-        didUpdateNotificationStateFor characteristic: CBCharacteristic,
-        error: Error?
-    ) {
+    public func peripheral(_ peripheral: CBPeripheral,
+                           didUpdateNotificationStateFor characteristic: CBCharacteristic,
+                           error: Error?)
+    {
         let deviceID = peripheral.identifier
         
         print("[BLECentral] Notification state updated:", deviceID)
@@ -1485,6 +1491,16 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate
             return
         }
         
+        guard peripheral.state == .connected,
+              !disconnectingDevices.contains(deviceID)
+        else {
+            print(
+                "[BLECentral] Ready skipped (disconnected):",
+                deviceID
+            )
+            return
+        }
+
         delegate?.centralDidBecomeReady(deviceID: deviceID)
     }
     
