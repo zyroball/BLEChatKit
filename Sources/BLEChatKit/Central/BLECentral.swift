@@ -1253,7 +1253,25 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate
                 "[BLECentral] Service discovery failed:",
                 String(describing: error)
             )
-            delegate?.centralDidBecomeNotReady(deviceID: deviceID)
+
+            let discoveryError = error ?? NSError(
+                domain: "BLEChatKit",
+                code: 1008,
+                userInfo: [
+                    NSLocalizedDescriptionKey:
+                        "BLEChatKit service discovery failed."
+                ]
+            )
+
+            failPendingMessages(
+                for: deviceID,
+                error: discoveryError
+            )
+
+            delegate?.centralDidBecomeNotReady(
+                deviceID: deviceID
+            )
+
             return
         }
 
