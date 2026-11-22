@@ -581,6 +581,7 @@ extension BLEChatManager: BLEPeripheralDelegate
         )
     }
     
+    
     public func peripheralDidFinishEnqueuing(
         messageID: UUID,
         to centralID: UUID
@@ -592,8 +593,26 @@ extension BLEChatManager: BLEPeripheralDelegate
             centralID
         )
 
+        // ACK受信前なので送信完了通知は行わない
+        // onSendCompleted?(messageID, centralID)
+    }
+    
+    
+    public func peripheralDidReceiveAcknowledgment(
+        messageID: UUID,
+        from centralID: UUID
+    ) {
+        print(
+            "[BLEChatManager] Peripheral ACK confirmed:",
+            messageID,
+            "from:",
+            centralID
+        )
+
+        // ACK確認後に正式な送信完了を通知
         onSendCompleted?(messageID, centralID)
     }
+
     
     public func peripheralDidFailToSend(
         messageID: UUID,

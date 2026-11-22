@@ -29,6 +29,10 @@ private var debugAcknowledgmentEnabled = true
     
     private let messageAssembler = BLEMessageAssembler()
     private var notificationQueues: [UUID: [NotificationItem]] = [:]
+    // CentralごとのACK待機中messageID
+    private var pendingOutgoingAcknowledgments: [UUID: Set<UUID>] = [:]
+    // Central・messageIDごとのACKタイムアウトタスク
+    private var outgoingAcknowledgmentTimeoutTasks: [UUID: [UUID: DispatchWorkItem]] = [:]
     private var sendingCentrals: Set<UUID> = []
     public weak var delegate: BLEPeripheralDelegate?
     private var peripheralManager: CBPeripheralManager!
@@ -235,14 +239,29 @@ private var debugAcknowledgmentEnabled = true
             throw BLETransportError.messageTooLarge
         }
 
+        // ACK待機対象として登録
+        pendingOutgoingAcknowledgments[
+            centralID,
+            default: []
+        ].insert(messageID)
+
+        print(
+            "[BLEPeripheral] Waiting for ACK:",
+            messageID,
+            "from:",
+            centralID
+        )
+
         // 上限以内ならキューに追加
         notificationQueues[centralID, default: []].append(
             contentsOf: encodedPackets
         )
 
         // 送信処理を開始
-        sendNextNotification(to: centralID,
-                             characteristic: characteristic)
+        sendNextNotification(
+            to: centralID,
+            characteristic: characteristic
+        )
     }
     
     private func sendNextNotification(to centralID: UUID,
@@ -315,6 +334,11 @@ private var debugAcknowledgmentEnabled = true
                     "[BLEPeripheral] Message enqueue completed:",
                     item.messageID
                 )
+                
+                startOutgoingAcknowledgmentTimeout(
+                    messageID: item.messageID,
+                    for: centralID
+                )
 
                 delegate?.peripheralDidFinishEnqueuing(
                     messageID: item.messageID,
@@ -386,18 +410,36 @@ private var debugAcknowledgmentEnabled = true
     
     private func cleanupAllConnections()
     {
-        // 失敗通知に必要な情報を退避
-        let pendingMessages = notificationQueues.map {
-            (centralID, items) in
-            (
-                centralID,
-                Set(
-                    items
-                        .filter { $0.kind == .message }
-                        .map { $0.messageID }
-                )
+        // 失敗通知対象のメッセージをまとめる
+        var pendingMessages: [UUID: Set<UUID>] = [:]
+
+        // Notificationキュー内の未送信メッセージ
+        for (centralID, items) in notificationQueues {
+
+            let messageIDs = Set(
+                items
+                    .filter { $0.kind == .message }
+                    .map { $0.messageID }
             )
+
+            pendingMessages[
+                centralID,
+                default: []
+            ].formUnion(messageIDs)
         }
+
+        // ACK待機中のメッセージも失敗対象に追加
+        for (centralID, messageIDs) in pendingOutgoingAcknowledgments {
+
+            pendingMessages[
+                centralID,
+                default: []
+            ].formUnion(messageIDs)
+        }
+
+        // ACK待機状態をすべて削除
+        pendingOutgoingAcknowledgments.removeAll()
+
 
         // 送信キューをすべて削除
         notificationQueues.removeAll()
@@ -410,6 +452,17 @@ private var debugAcknowledgmentEnabled = true
 
         notificationTimeoutTasks.removeAll()
         notificationTimeoutIDs.removeAll()
+        
+        // ACKタイムアウト監視をすべて解除
+        for tasks in outgoingAcknowledgmentTimeoutTasks.values {
+            for task in tasks.values {
+                task.cancel()
+            }
+        }
+
+        // ACKタイマー管理情報を初期化
+        outgoingAcknowledgmentTimeoutTasks.removeAll()
+
 
         // 送信中フラグをすべて解除
         sendingCentrals.removeAll()
@@ -490,6 +543,20 @@ private var debugAcknowledgmentEnabled = true
                     .filter { $0.kind == .message }
                     .map { $0.messageID }
             )
+            
+            // 送信失敗したメッセージをACK待機対象から削除
+            if var pending = self.pendingOutgoingAcknowledgments[centralID] {
+
+                pending.subtract(messageIDs)
+
+                if pending.isEmpty {
+                    self.pendingOutgoingAcknowledgments.removeValue(
+                        forKey: centralID
+                    )
+                } else {
+                    self.pendingOutgoingAcknowledgments[centralID] = pending
+                }
+            }
 
             for messageID in messageIDs {
                 self.delegate?.peripheralDidFailToSend(
@@ -565,6 +632,101 @@ guard debugAcknowledgmentEnabled else {
             characteristic: characteristic
         )
     }
+    
+    private func cancelOutgoingAcknowledgmentTimeout(
+        messageID: UUID,
+        for centralID: UUID
+    ) {
+        guard var tasks = outgoingAcknowledgmentTimeoutTasks[centralID]
+        else {
+            return
+        }
+
+        // 対象メッセージのタイマーを解除
+        tasks.removeValue(forKey: messageID)?.cancel()
+
+        // 残りのタイマーを管理
+        if tasks.isEmpty {
+            outgoingAcknowledgmentTimeoutTasks.removeValue(
+                forKey: centralID
+            )
+        } else {
+            outgoingAcknowledgmentTimeoutTasks[centralID] = tasks
+        }
+    }
+    
+    
+    private func startOutgoingAcknowledgmentTimeout(
+        messageID: UUID,
+        for centralID: UUID
+    ) {
+        guard pendingOutgoingAcknowledgments[centralID]?
+            .contains(messageID) == true
+        else {
+            return
+        }
+
+        // 既存タイマーがあれば解除
+        cancelOutgoingAcknowledgmentTimeout(
+            messageID: messageID,
+            for: centralID
+        )
+
+        let task = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+
+            // まだACK待機中か確認
+            guard self.pendingOutgoingAcknowledgments[centralID]?
+                .contains(messageID) == true
+            else {
+                return
+            }
+
+            print(
+                "[BLEPeripheral] ACK timeout:",
+                messageID,
+                "from:",
+                centralID
+            )
+
+            self.cancelOutgoingAcknowledgmentTimeout(
+                messageID: messageID,
+                for: centralID
+            )
+
+            // ACK待機情報から対象メッセージを削除
+            if var pending = self.pendingOutgoingAcknowledgments[centralID],
+               pending.remove(messageID) != nil {
+
+                if pending.isEmpty {
+                    self.pendingOutgoingAcknowledgments.removeValue(
+                        forKey: centralID
+                    )
+                } else {
+                    self.pendingOutgoingAcknowledgments[centralID] = pending
+                }
+
+                // ACKタイムアウトによる送信失敗を通知
+                self.delegate?.peripheralDidFailToSend(
+                    messageID: messageID,
+                    to: centralID,
+                    error: BLESendError.acknowledgmentTimeout
+                )
+            }
+        }
+
+        outgoingAcknowledgmentTimeoutTasks[
+            centralID,
+            default: [:]
+        ][messageID] = task
+
+        // 暫定15秒でACKを監視
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + 15,
+            execute: task
+        )
+    }
+
     
     public func stopAndRemoveServices() {
 
@@ -691,6 +853,63 @@ extension BLEPeripheral: @preconcurrency CBPeripheralManagerDelegate
             }
             do
             {
+                
+                if BLEAcknowledgmentPacket.isPacket(data) {
+
+                    let ack = try BLEAcknowledgmentPacket.decode(
+                        from: data
+                    )
+
+                    let centralID = request.central.identifier
+
+                    // 送信待ちのmessageIDと照合
+                    if var pending = pendingOutgoingAcknowledgments[centralID],
+                       pending.remove(ack.messageID) != nil {
+
+                        // ACK待機状態を更新
+                        if pending.isEmpty {
+                            pendingOutgoingAcknowledgments.removeValue(
+                                forKey: centralID
+                            )
+                        } else {
+                            pendingOutgoingAcknowledgments[centralID] = pending
+                        }
+
+                        print(
+                            "[BLEPeripheral] ACK matched:",
+                            ack.messageID,
+                            "from:",
+                            centralID
+                        )
+                        
+                        cancelOutgoingAcknowledgmentTimeout(
+                            messageID: ack.messageID,
+                            for: centralID
+                        )
+
+                        delegate?.peripheralDidReceiveAcknowledgment(
+                            messageID: ack.messageID,
+                            from: centralID
+                        )
+                    } else {
+
+                        print(
+                            "[BLEPeripheral] Unknown ACK:",
+                            ack.messageID,
+                            "from:",
+                            centralID
+                        )
+                    }
+
+                    peripheral.respond(
+                        to: request,
+                        withResult: .success
+                    )
+
+                    continue
+                }
+
+
                 // 分割パケットかどうか判定
                 if BLEMessagePacket.isPacket(data)
                 {
@@ -888,13 +1107,23 @@ extension BLEPeripheral: @preconcurrency CBPeripheralManagerDelegate
         let pendingItems = notificationQueues.removeValue(
             forKey: centralID
         ) ?? []
+        // ACK待機中のメッセージIDを取得して削除
+        let awaitingAckMessageIDs =
+            pendingOutgoingAcknowledgments.removeValue(
+                forKey: centralID
+            ) ?? []
 
         // 未送信メッセージIDを取得
-        let pendingMessageIDs = Set(
+        let queuedMessageIDs = Set(
             pendingItems
                 .filter { $0.kind == .message }
                 .map { $0.messageID }
         )
+
+        // 未送信とACK待機中のIDを統合
+        let pendingMessageIDs =
+            queuedMessageIDs.union(awaitingAckMessageIDs)
+
         
         print(
             "[BLEPeripheral] Unsubscribed pending messages:",
@@ -903,6 +1132,15 @@ extension BLEPeripheral: @preconcurrency CBPeripheralManagerDelegate
 
         // タイムアウト監視を解除
         cancelNotificationTimeout(for: centralID)
+        
+        // このCentralのACKタイムアウトをすべて解除
+        if let tasks = outgoingAcknowledgmentTimeoutTasks.removeValue(
+            forKey: centralID
+        ) {
+            for task in tasks.values {
+                task.cancel()
+            }
+        }
 
         // 送信中フラグを解除
         sendingCentrals.remove(centralID)

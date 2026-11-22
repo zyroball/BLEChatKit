@@ -13,6 +13,7 @@ public enum BLESendError: Error
     case writeFailed
     case writeTimeout
     case notificationTimeout
+    case acknowledgmentTimeout
     case queueFull
     case disconnected
 }

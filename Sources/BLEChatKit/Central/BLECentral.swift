@@ -394,6 +394,44 @@ public func debugEnableNotification(for deviceID: UUID) {
         return packets
     }
     
+    
+    private func sendAcknowledgment(messageID: UUID,
+                                    to deviceID: UUID)
+    {
+        guard let peripheral = discoveredPeripherals[deviceID],
+              peripheral.state == .connected,
+              messageCharacteristics[deviceID] != nil,
+              !disconnectingDevices.contains(deviceID)
+        else {
+            print("[BLECentral] ACK enqueue skipped:", messageID)
+            return
+        }
+
+        // ACKパケットを生成
+        let ack = BLEAcknowledgmentPacket(
+            messageID: messageID
+        )
+
+        // 既存の送信キュー形式へ変換
+        let packet = BLEOutgoingPacketQueue.OutgoingPacket(
+            messageID: messageID,
+            data: ack.encode(),
+            isLastChunk: false
+        )
+
+        // ACK自身はACK待機対象に登録しない
+        outgoingPacketQueue.enqueue(
+            [packet],
+            for: deviceID
+        )
+
+        print("[BLECentral] ACK enqueued:", messageID)
+
+        // 既存の書き込み制御を利用
+        sendNextPacket(to: deviceID)
+    }
+
+    
     public func sendChunked(_ message: String,
                             to deviceID: UUID,
                             messageID: UUID = UUID()) throws
@@ -1762,26 +1800,33 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate
             if BLEMessagePacket.isPacket(data)
             {
                 let packet = try BLEMessagePacket.decode(from: data)
-
+                
                 guard let restoredData = messageAssembler.append(packet,
                                                                  from: peripheral.identifier)
                 else
                 {
                     return
                 }
-
+                
                 let message = try BLETransport.decode(restoredData)
-
+                
                 // デコード成功後に完成済みとして登録
                 messageAssembler.markMessageCompleted(
                     messageID: packet.messageID,
                     from: peripheral.identifier
                 )
-
+                
                 delegate?.centralDidReceiveMessage(
                     message,
                     from: peripheral.identifier
-                )            }
+                )
+
+                // 受信完了ACKをCentralからPeripheralへ返信
+                sendAcknowledgment(
+                    messageID: packet.messageID,
+                    to: peripheral.identifier
+                )
+            }
             else
             {
                 let message = try BLETransport.decode(data)

@@ -31,4 +31,5 @@ public protocol BLEPeripheralDelegate: AnyObject
     func peripheralDidFinishEnqueuing(to centralID: UUID)
     func peripheralDidFinishEnqueuing(messageID: UUID, to centralID: UUID)
     func peripheralDidFailToSend(messageID: UUID,to centralID: UUID, error: Error)
+    func peripheralDidReceiveAcknowledgment(messageID: UUID,from centralID: UUID)
 }
