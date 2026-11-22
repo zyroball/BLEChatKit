@@ -77,10 +77,40 @@ public func debugSetAcknowledgmentEnabled(_ enabled: Bool) {
     /// 既存のBLE接続は切断しない。
     /// 接続を切断する場合は disconnect(from:) を使用する。
     public func stop() {
+
         shouldRun = false
 
+        // BLEスキャン停止
         central.stopScan()
-        peripheral.stopAdvertising()
+
+        // Central側の接続解除要求
+        central.disconnectAllActivePeripherals()
+
+        // Advertising停止
+        peripheral.stopAndRemoveServices()
+        
+        
+        let previouslyReadyDeviceIDs = readyDeviceIDs
+
+        // Central側のReady情報を削除
+        readyCentralDeviceIDs.removeAll()
+
+        // Peripheral側のReady情報を削除
+        peripheralCentralIDs.removeAll()
+
+        // Ready解除をアプリ側に通知
+        for deviceID in previouslyReadyDeviceIDs {
+            delegate?.chatManagerDidBecomeNotReady(
+                deviceID: deviceID
+            )
+        }
+
+        print(
+            "[BLEChatManager] Ready devices cleared:",
+            readyDeviceIDs.count
+        )
+
+        print("[BLEChatManager] Stop requested")
     }
 
     public func connect(to deviceID: UUID) {
@@ -290,7 +320,17 @@ extension BLEChatManager: BLECentralDelegate
         )
     }
     
+    
     public func centralDidBecomeReady(deviceID: UUID) {
+
+        // BLEChatKit停止中はReady登録しない
+        guard shouldRun else {
+            print(
+                "[BLEChatManager] Ignoring Central Ready while stopped:",
+                deviceID
+            )
+            return
+        }
 
         let wasReady = isReady(for: deviceID)
 
@@ -309,6 +349,7 @@ extension BLEChatManager: BLECentralDelegate
 
         delegate?.chatManagerDidBecomeReady(deviceID: deviceID)
     }
+
     
     public func centralDidBecomeNotReady(deviceID: UUID) {
 
@@ -449,6 +490,14 @@ extension BLEChatManager: BLEPeripheralDelegate
     
     public func peripheralDidSubscribe(centralID: UUID)
     {
+        guard shouldRun else {
+            print(
+                "[BLEChatManager] Ignoring subscribe while stopped:",
+                centralID
+            )
+            return
+        }
+
         let wasReady = isReady(for: centralID)
 
         let inserted = peripheralCentralIDs.insert(centralID).inserted

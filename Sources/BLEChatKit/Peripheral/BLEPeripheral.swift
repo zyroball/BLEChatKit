@@ -42,6 +42,8 @@ private var debugAcknowledgmentEnabled = true
     private let maxNotificationQueueBytes = 2_097_152
 
     private var serviceRegistrationInProgress = false
+    private var cancelledServiceRegistrationPending = false
+
     private var serviceReady = false
     private var advertisingRequested = false
     private var advertisementLocalName: String?
@@ -563,6 +565,36 @@ guard debugAcknowledgmentEnabled else {
             characteristic: characteristic
         )
     }
+    
+    public func stopAndRemoveServices() {
+
+        // Advertisingの自動再開を抑制
+        advertisingRequested = false
+        
+        // サービス登録中に停止したことを記録
+        cancelledServiceRegistrationPending =
+            serviceRegistrationInProgress
+
+        // Advertising停止
+        peripheralManager.stopAdvertising()
+
+        // GATTサービス削除
+        if peripheralManager.state == .poweredOn {
+            peripheralManager.removeAllServices()
+
+            print("[BLEPeripheral] GATT service removal requested")
+        }
+
+        // サービス登録状態を初期化
+        serviceReady = false
+        messageCharacteristic = nil
+
+        // 通信状態を初期化
+        cleanupAllConnections()
+
+        print("[BLEPeripheral] Stop and cleanup requested")
+    }
+
 }
 
 // MARK: - CBPeripheralManagerDelegate
@@ -752,6 +784,35 @@ extension BLEPeripheral: @preconcurrency CBPeripheralManagerDelegate
         guard service.uuid == BLEUUID.service else {
             return
         }
+        
+        if cancelledServiceRegistrationPending {
+
+            // 停止前のサービス登録完了通知を処理
+            cancelledServiceRegistrationPending = false
+            serviceRegistrationInProgress = false
+
+            serviceReady = false
+            messageCharacteristic = nil
+
+            // 遅れて登録されたサービスも削除
+            if peripheralManager.state == .poweredOn {
+                peripheralManager.removeAllServices()
+            }
+
+            print(
+                "[BLEPeripheral] Cancelled service registration callback handled"
+            )
+
+            // 停止後に再起動要求があった場合は再登録
+            if advertisingRequested,
+               peripheralManager.state == .poweredOn {
+
+                setupService()
+            }
+
+            return
+        }
+
 
         serviceRegistrationInProgress = false
 

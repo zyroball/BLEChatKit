@@ -68,6 +68,32 @@ public final class BLECentral: NSObject
             queue: nil
         )
     }
+    
+    
+    public func disconnectAllActivePeripherals() {
+
+        let activeDeviceIDs = discoveredPeripherals.compactMap {
+            deviceID, peripheral -> UUID? in
+
+            let state = connection.state(for: deviceID)
+
+            guard state == .connected || state == .connecting else {
+                return nil
+            }
+
+            return deviceID
+        }
+
+        print(
+            "[BLECentral] Disconnecting active peripherals:",
+            activeDeviceIDs.count
+        )
+
+        for deviceID in activeDeviceIDs {
+            disconnect(from: deviceID)
+        }
+    }
+
 
     public func startScan()
     {
