@@ -1822,10 +1822,11 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate
                 )
 
                 // 受信完了ACKをCentralからPeripheralへ返信
-                sendAcknowledgment(
-                    messageID: packet.messageID,
-                    to: peripheral.identifier
-                )
+                // ACK未着テストのため一時的に無効化
+                // sendAcknowledgment(
+                //     messageID: packet.messageID,
+                //     to: peripheral.identifier
+                // )
             }
             else
             {
