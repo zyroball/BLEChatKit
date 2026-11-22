@@ -28,15 +28,22 @@ private var debugAcknowledgmentEnabled = true
 #endif
     
     private let messageAssembler = BLEMessageAssembler()
+    private var peripheralManager: CBPeripheralManager!
+    private var messageCharacteristic: CBMutableCharacteristic?
     private var notificationQueues: [UUID: [NotificationItem]] = [:]
     // CentralごとのACK待機中messageID
     private var pendingOutgoingAcknowledgments: [UUID: Set<UUID>] = [:]
+    // ACK未着時の再送用パケットを保持
+    // Central ID → Message ID → 分割パケット
+    private var outgoingRetryPackets: [UUID: [UUID: [NotificationItem]]] = [:]
+    // Central・messageIDごとの再送回数
+    private var outgoingRetryCounts: [UUID: [UUID: Int]] = [:]
+    // ACK未着時の最大再送回数
+    private let maxOutgoingRetryCount = 3
     // Central・messageIDごとのACKタイムアウトタスク
     private var outgoingAcknowledgmentTimeoutTasks: [UUID: [UUID: DispatchWorkItem]] = [:]
     private var sendingCentrals: Set<UUID> = []
     public weak var delegate: BLEPeripheralDelegate?
-    private var peripheralManager: CBPeripheralManager!
-    private var messageCharacteristic: CBMutableCharacteristic?
     private var subscribedCentrals: [UUID: CBCentral] = [:]
     private var notificationTimeoutTasks: [UUID: DispatchWorkItem] = [:]
     private let notificationTimeout: TimeInterval = 30
@@ -239,6 +246,22 @@ private var debugAcknowledgmentEnabled = true
             throw BLETransportError.messageTooLarge
         }
 
+        // ACK未着時の再送用パケットを保存
+        outgoingRetryPackets[centralID,
+                             default: [:]][messageID] = encodedPackets
+        
+        // 初回送信なので再送回数は0
+        outgoingRetryCounts[
+            centralID,
+            default: [:]
+        ][messageID] = 0
+
+
+        print("[BLEPeripheral] Retry packets saved:",
+              messageID,
+              "count:",
+              encodedPackets.count)
+        
         // ACK待機対象として登録
         pendingOutgoingAcknowledgments[
             centralID,
@@ -439,7 +462,12 @@ private var debugAcknowledgmentEnabled = true
 
         // ACK待機状態をすべて削除
         pendingOutgoingAcknowledgments.removeAll()
-
+        
+        // 再送用パケットをすべて削除
+        outgoingRetryPackets.removeAll()
+        
+        // 再送回数をすべて削除
+        outgoingRetryCounts.removeAll()
 
         // 送信キューをすべて削除
         notificationQueues.removeAll()
@@ -557,6 +585,39 @@ private var debugAcknowledgmentEnabled = true
                     self.pendingOutgoingAcknowledgments[centralID] = pending
                 }
             }
+            
+            // Notification送信失敗したメッセージの再送データを削除
+            if var retryPackets = self.outgoingRetryPackets[centralID] {
+
+                for messageID in messageIDs {
+                    retryPackets.removeValue(forKey: messageID)
+                }
+
+                if retryPackets.isEmpty {
+                    self.outgoingRetryPackets.removeValue(
+                        forKey: centralID
+                    )
+                } else {
+                    self.outgoingRetryPackets[centralID] = retryPackets
+                }
+            }
+            
+            // Notification送信失敗したメッセージの再送回数を削除
+            if var retryCounts = self.outgoingRetryCounts[centralID] {
+
+                for messageID in messageIDs {
+                    retryCounts.removeValue(forKey: messageID)
+                }
+
+                if retryCounts.isEmpty {
+                    self.outgoingRetryCounts.removeValue(
+                        forKey: centralID
+                    )
+                } else {
+                    self.outgoingRetryCounts[centralID] = retryCounts
+                }
+            }
+
 
             for messageID in messageIDs {
                 self.delegate?.peripheralDidFailToSend(
@@ -574,6 +635,66 @@ private var debugAcknowledgmentEnabled = true
             execute: task
         )
     }
+    
+    private func enqueueOutgoingRetry(messageID: UUID,
+                                      for centralID: UUID) -> Bool
+    {
+        // ACK待機中で、再送可能な接続か確認
+        guard pendingOutgoingAcknowledgments[centralID]?
+            .contains(messageID) == true,
+              subscribedCentrals[centralID] != nil,
+              let characteristic = messageCharacteristic,
+              let packets = outgoingRetryPackets[centralID]?[messageID],
+              !packets.isEmpty
+        else {
+            return false
+        }
+
+        // 同じメッセージが既にキューにないか確認
+        let alreadyQueued = notificationQueues[centralID]?
+            .contains(where: {
+                $0.messageID == messageID && $0.kind == .message
+            }) ?? false
+
+        guard !alreadyQueued else {
+            return false
+        }
+
+        // 再送パケットの合計サイズ
+        let additionalSize = packets.reduce(0) {
+            $0 + $1.data.count
+        }
+
+        let currentSize = notificationQueueSize(for: centralID)
+
+        // Notificationキューの上限を確認
+        guard additionalSize <= maxNotificationQueueBytes,
+              currentSize <= maxNotificationQueueBytes - additionalSize
+        else {
+            return false
+        }
+
+        // 保存済みパケットを再送キューへ追加
+        notificationQueues[centralID, default: []].append(
+            contentsOf: packets
+        )
+
+        print(
+            "[BLEPeripheral] Retry enqueued:",
+            messageID,
+            "packets:",
+            packets.count
+        )
+
+        // 再送開始
+        sendNextNotification(
+            to: centralID,
+            characteristic: characteristic
+        )
+
+        return true
+    }
+
     
 #if DEBUG
 public func debugSetAcknowledgmentEnabled(_ enabled: Bool) {
@@ -693,6 +814,49 @@ guard debugAcknowledgmentEnabled else {
                 messageID: messageID,
                 for: centralID
             )
+            
+            // 再送可能なら同じmessageIDで再送する
+            if let attempt = self.nextOutgoingRetryAttempt(
+                messageID: messageID,
+                for: centralID
+            ) {
+                if self.enqueueOutgoingRetry(
+                    messageID: messageID,
+                    for: centralID
+                ) {
+                    print(
+                        "[BLEPeripheral] ACK retry:",
+                        messageID,
+                        "attempt:",
+                        attempt
+                    )
+
+                    // 再送を開始できたので失敗通知しない
+                    return
+                }
+
+                print(
+                    "[BLEPeripheral] ACK retry enqueue failed:",
+                    messageID
+                )
+            }
+            
+            // 送信失敗が確定したため再送用データを削除
+            self.outgoingRetryPackets[centralID]?
+                .removeValue(forKey: messageID)
+
+            if self.outgoingRetryPackets[centralID]?.isEmpty == true {
+                self.outgoingRetryPackets.removeValue(forKey: centralID)
+            }
+
+            // 再送回数も削除
+            self.outgoingRetryCounts[centralID]?
+                .removeValue(forKey: messageID)
+
+            if self.outgoingRetryCounts[centralID]?.isEmpty == true {
+                self.outgoingRetryCounts.removeValue(forKey: centralID)
+            }
+
 
             // ACK待機情報から対象メッセージを削除
             if var pending = self.pendingOutgoingAcknowledgments[centralID],
@@ -756,6 +920,30 @@ guard debugAcknowledgmentEnabled else {
 
         print("[BLEPeripheral] Stop and cleanup requested")
     }
+    
+    
+    private func nextOutgoingRetryAttempt(messageID: UUID,
+                                          for centralID: UUID) -> Int?
+    {
+        // 再送データと現在の再送回数を確認
+        guard outgoingRetryPackets[centralID]?[messageID] != nil,
+              let currentCount = outgoingRetryCounts[centralID]?[messageID],
+              currentCount < maxOutgoingRetryCount
+        else {
+            return nil
+        }
+
+        // 再送回数を1回増やす
+        let nextCount = currentCount + 1
+
+        outgoingRetryCounts[
+            centralID,
+            default: [:]
+        ][messageID] = nextCount
+
+        return nextCount
+    }
+
 
 }
 
@@ -881,6 +1069,34 @@ extension BLEPeripheral: @preconcurrency CBPeripheralManagerDelegate
                             "from:",
                             centralID
                         )
+                        
+                        // ACK受信済みメッセージの再送データを削除
+                        if var retryPackets = outgoingRetryPackets[centralID] {
+
+                            retryPackets.removeValue(forKey: ack.messageID)
+
+                            if retryPackets.isEmpty {
+                                outgoingRetryPackets.removeValue(
+                                    forKey: centralID
+                                )
+                            } else {
+                                outgoingRetryPackets[centralID] = retryPackets
+                            }
+                        }
+                        
+                        // ACK受信済みメッセージの再送回数を削除
+                        if var retryCounts = outgoingRetryCounts[centralID] {
+
+                            retryCounts.removeValue(forKey: ack.messageID)
+
+                            if retryCounts.isEmpty {
+                                outgoingRetryCounts.removeValue(
+                                    forKey: centralID
+                                )
+                            } else {
+                                outgoingRetryCounts[centralID] = retryCounts
+                            }
+                        }
                         
                         cancelOutgoingAcknowledgmentTimeout(
                             messageID: ack.messageID,
@@ -1123,12 +1339,16 @@ extension BLEPeripheral: @preconcurrency CBPeripheralManagerDelegate
         // 未送信とACK待機中のIDを統合
         let pendingMessageIDs =
             queuedMessageIDs.union(awaitingAckMessageIDs)
-
         
+        // 購読解除したCentralの再送用パケットを削除
+        outgoingRetryPackets.removeValue(forKey: centralID)
         print(
             "[BLEPeripheral] Unsubscribed pending messages:",
             pendingMessageIDs.count
         )
+        
+        // 購読解除したCentralの再送回数を削除
+        outgoingRetryCounts.removeValue(forKey: centralID)
 
         // タイムアウト監視を解除
         cancelNotificationTimeout(for: centralID)

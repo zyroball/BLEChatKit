@@ -1801,6 +1801,28 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate
             {
                 let packet = try BLEMessagePacket.decode(from: data)
                 
+                // 受信完了済みのメッセージは重複処理しない
+                if messageAssembler.isMessageCompleted(
+                    messageID: packet.messageID,
+                    from: peripheral.identifier
+                ) {
+                    print(
+                        "[BLECentral] Duplicate message, re-ACK:",
+                        packet.messageID
+                    )
+
+                    // ACKが失われた可能性があるため再返信
+                    
+                    // ACK自動再送テストのため一時的に無効化
+                    // sendAcknowledgment(
+                    //     messageID: packet.messageID,
+                    //     to: peripheral.identifier
+                    // )
+
+
+                    return
+                }
+                
                 guard let restoredData = messageAssembler.append(packet,
                                                                  from: peripheral.identifier)
                 else
