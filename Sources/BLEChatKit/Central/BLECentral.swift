@@ -1812,10 +1812,10 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate
                     )
 
                     // ACKが失われた可能性があるため再返信
-//                     sendAcknowledgment(
-//                         messageID: packet.messageID,
-//                         to: peripheral.identifier
-//                     )
+                     sendAcknowledgment(
+                         messageID: packet.messageID,
+                         to: peripheral.identifier
+                     )
 
                     return
                 }
