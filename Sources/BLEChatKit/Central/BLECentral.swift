@@ -1841,10 +1841,10 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate
                 )
 
                 // 受信完了ACKをCentralからPeripheralへ返信
-                sendAcknowledgment(
-                    messageID: packet.messageID,
-                    to: peripheral.identifier
-                )
+//                sendAcknowledgment(
+//                    messageID: packet.messageID,
+//                    to: peripheral.identifier
+//                )
             }
             else
             {
