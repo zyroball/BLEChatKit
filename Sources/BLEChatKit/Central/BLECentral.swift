@@ -1408,6 +1408,8 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate
             delegate?.centralDidBecomeNotReady(
                 deviceID: deviceID
             )
+            
+            disconnect(from: deviceID)
 
             return
         }
