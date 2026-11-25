@@ -13,6 +13,22 @@ final class BLEOutgoingPacketQueue {
         let messageID: UUID
         let data: Data
         let isLastChunk: Bool
+        let chunkIndex: Int?
+        let totalChunks: Int?
+
+        init(
+            messageID: UUID,
+            data: Data,
+            isLastChunk: Bool,
+            chunkIndex: Int? = nil,
+            totalChunks: Int? = nil
+        ) {
+            self.messageID = messageID
+            self.data = data
+            self.isLastChunk = isLastChunk
+            self.chunkIndex = chunkIndex
+            self.totalChunks = totalChunks
+        }
     }
 
     private var queues: [UUID: [OutgoingPacket]] = [:]

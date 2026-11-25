@@ -21,7 +21,31 @@ public final class BLEPeripheral: NSObject
         let messageID: UUID
         let data: Data
         let kind: NotificationKind
+        let chunkIndex: Int?
+        let totalChunks: Int?
+
+        init(
+            messageID: UUID,
+            data: Data,
+            kind: NotificationKind,
+            chunkIndex: Int? = nil,
+            totalChunks: Int? = nil
+        ) {
+            self.messageID = messageID
+            self.data = data
+            self.kind = kind
+            self.chunkIndex = chunkIndex
+            self.totalChunks = totalChunks
+        }
     }
+    
+    /// メッセージの送信進捗通知
+    var onSendProgress: ((
+        _ messageID: UUID,
+        _ deviceID: UUID,
+        _ sentChunks: Int,
+        _ totalChunks: Int
+    ) -> Void)?
     
 #if DEBUG
 private var debugAcknowledgmentEnabled = true
@@ -216,11 +240,14 @@ private var debugAcknowledgmentEnabled = true
             messageID
         )
 
-        let encodedPackets = try packets.map { packet in
+        let encodedPackets = try packets.enumerated().map { index, packet in
+
             NotificationItem(
                 messageID: packet.messageID,
                 data: try packet.encode(),
-                kind: .message
+                kind: .message,
+                chunkIndex: index,
+                totalChunks: packets.count
             )
         }
 
@@ -347,6 +374,21 @@ private var debugAcknowledgmentEnabled = true
 
             notificationQueues[centralID]?.removeFirst()
             didSendPacket = true
+            
+            // メッセージの送信進捗を通知
+            if item.kind == .message,
+               let chunkIndex = item.chunkIndex,
+               let totalChunks = item.totalChunks,
+               pendingOutgoingAcknowledgments[centralID]?
+                   .contains(item.messageID) == true {
+
+                onSendProgress?(
+                    item.messageID,
+                    centralID,
+                    chunkIndex + 1,
+                    totalChunks
+                )
+            }
 
             let nextMessageID = notificationQueues[centralID]?.first?.messageID
 

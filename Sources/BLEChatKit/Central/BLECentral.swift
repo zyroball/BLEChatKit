@@ -19,6 +19,14 @@ public final class BLECentral: NSObject
         var retryCount: Int
     }
     
+    /// メッセージの送信進捗通知
+    var onSendProgress: ((
+        _ messageID: UUID,
+        _ deviceID: UUID,
+        _ sentChunks: Int,
+        _ totalChunks: Int
+    ) -> Void)?
+
     private var pendingAcknowledgments:
         [UUID: [UUID: PendingAcknowledgment]] = [:]
     private let messageAssembler = BLEMessageAssembler()
@@ -458,10 +466,13 @@ public func debugEnableNotification(for deviceID: UUID) {
 
         // 各パケットに最終チャンク情報を付与
         let outgoingPackets = try packets.enumerated().map { index, packet in
+
             BLEOutgoingPacketQueue.OutgoingPacket(
                 messageID: packet.messageID,
                 data: try packet.encode(),
-                isLastChunk: index == packets.count - 1
+                isLastChunk: index == packets.count - 1,
+                chunkIndex: index,
+                totalChunks: packets.count
             )
         }
 
@@ -1286,6 +1297,19 @@ extension BLECentral: @preconcurrency CBPeripheralDelegate
 
         // 書き込み状態を解除
         writingDevices.remove(deviceID)
+        
+        // メッセージの送信進捗を通知
+        if let chunkIndex = packet.chunkIndex,
+           let totalChunks = packet.totalChunks,
+           pendingAcknowledgments[deviceID]?[packet.messageID] != nil {
+
+            onSendProgress?(
+                packet.messageID,
+                deviceID,
+                chunkIndex + 1,
+                totalChunks
+            )
+        }
 
         // ACK失敗済みメッセージの書き込みが完了した場合
         if failedMessageIDs[deviceID]?.contains(packet.messageID) == true

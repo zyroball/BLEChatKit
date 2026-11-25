@@ -28,4 +28,22 @@ public protocol BLEChatManagerDelegate: AnyObject
                                       from deviceID: UUID)
     /// エラーが発生した
     func chatManagerDidFail(_ error: Error)
+    
+    /// メッセージの送信進捗が変更された
+    func chatManagerDidUpdateSendProgress(messageID: UUID,
+                                          deviceID: UUID,
+                                          sentChunks: Int,
+                                          totalChunks: Int)
+}
+
+public extension BLEChatManagerDelegate {
+
+    func chatManagerDidUpdateSendProgress(
+        messageID: UUID,
+        deviceID: UUID,
+        sentChunks: Int,
+        totalChunks: Int
+    ) {
+        // Default implementation
+    }
 }

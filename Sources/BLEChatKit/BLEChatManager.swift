@@ -45,12 +45,37 @@ public final class BLEChatManager
     private var isPeripheralReady = false
 
     public init() {
+
         central = BLECentral()
         peripheral = BLEPeripheral()
 
         central.delegate = self
         central.connection.delegate = self
         peripheral.delegate = self
+
+        // Central側の送信進捗通知
+        central.onSendProgress = { [weak self]
+            messageID, deviceID, sentChunks, totalChunks in
+
+            self?.delegate?.chatManagerDidUpdateSendProgress(
+                messageID: messageID,
+                deviceID: deviceID,
+                sentChunks: sentChunks,
+                totalChunks: totalChunks
+            )
+        }
+
+        // Peripheral側の送信進捗通知
+        peripheral.onSendProgress = { [weak self]
+            messageID, deviceID, sentChunks, totalChunks in
+
+            self?.delegate?.chatManagerDidUpdateSendProgress(
+                messageID: messageID,
+                deviceID: deviceID,
+                sentChunks: sentChunks,
+                totalChunks: totalChunks
+            )
+        }
     }
 
     public func start() {
