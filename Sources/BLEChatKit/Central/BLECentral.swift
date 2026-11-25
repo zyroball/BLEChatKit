@@ -113,7 +113,7 @@ public final class BLECentral: NSObject
         centralManager.scanForPeripherals(
             withServices: [BLEUUID.service],
             options: [
-                CBCentralManagerScanOptionAllowDuplicatesKey: true
+                CBCentralManagerScanOptionAllowDuplicatesKey: false
             ]
         )
     }
