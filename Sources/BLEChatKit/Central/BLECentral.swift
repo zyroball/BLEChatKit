@@ -878,11 +878,30 @@ extension BLECentral: @preconcurrency CBCentralManagerDelegate
     {
         discoveredPeripherals[peripheral.identifier] = peripheral
 
-        let advertisedName = advertisementData[CBAdvertisementDataLocalNameKey] as? String
+        let advertisedName =
+            advertisementData[CBAdvertisementDataLocalNameKey] as? String
 
-        let device = BLEDevice(id: peripheral.identifier,
-                               name: advertisedName ?? peripheral.name,
-                               rssi: RSSI.intValue)
+        print(
+            "[BLECentral Discovery] Advertisement data:",
+            advertisementData
+        )
+
+        print(
+            "[BLECentral Discovery] Advertised name:",
+            advertisedName ?? "nil"
+        )
+
+        print(
+            "[BLECentral Discovery] Peripheral name:",
+            peripheral.name ?? "nil"
+        )
+
+        let device = BLEDevice(
+            id: peripheral.identifier,
+            name: advertisedName ?? peripheral.name,
+            rssi: RSSI.intValue
+        )
+
         delegate?.centralDidDiscover(device)
     }
 
