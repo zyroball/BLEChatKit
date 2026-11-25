@@ -102,18 +102,18 @@ public final class BLECentral: NSObject
         }
     }
 
-
     public func startScan()
     {
         guard centralManager.state == .poweredOn,
-                 !centralManager.isScanning
-           else {
-               return
-           }
+              !centralManager.isScanning
+        else {
+            return
+        }
+
         centralManager.scanForPeripherals(
             withServices: [BLEUUID.service],
             options: [
-                CBCentralManagerScanOptionAllowDuplicatesKey: false
+                CBCentralManagerScanOptionAllowDuplicatesKey: true
             ]
         )
     }
