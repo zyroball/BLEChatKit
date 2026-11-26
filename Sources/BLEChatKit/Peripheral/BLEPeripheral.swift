@@ -199,12 +199,19 @@ private var debugAcknowledgmentEnabled = true
 
     private func advertise()
     {
+        print("[BLEPeripheral Advertise] Requested:", advertisingRequested)
+        print("[BLEPeripheral Advertise] Service ready:", serviceReady)
+        print("[BLEPeripheral Advertise] Powered on:", peripheralManager.state == .poweredOn)
+        print("[BLEPeripheral Advertise] Is advertising:", peripheralManager.isAdvertising)
+        print("[BLEPeripheral Advertise] Start pending:", isAdvertisingStartPending)
+
         guard advertisingRequested,
               serviceReady,
               peripheralManager.state == .poweredOn,
               !peripheralManager.isAdvertising,
               !isAdvertisingStartPending
         else {
+            print("[BLEPeripheral Advertise] Guard blocked")
             return
         }
 
@@ -221,6 +228,8 @@ private var debugAcknowledgmentEnabled = true
 
         advertisingLocalNameAtStart = advertisementLocalName
         isAdvertisingStartPending = true
+
+        print("[BLEPeripheral Advertise] Calling startAdvertising")
 
         peripheralManager.startAdvertising(advertisementData)
     }
