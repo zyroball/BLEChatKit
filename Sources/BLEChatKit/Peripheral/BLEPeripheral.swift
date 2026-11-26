@@ -82,9 +82,30 @@ private var debugAcknowledgmentEnabled = true
     private var serviceReady = false
     private var advertisingRequested = false
     private var advertisementLocalName: String?
+    private var isAdvertisingStartPending = false
+    private var advertisingLocalNameAtStart: String?
     
     public func setAdvertisementLocalName(_ name: String?) {
+
+        guard advertisementLocalName != name else {
+            return
+        }
+
         advertisementLocalName = name
+
+        guard !isAdvertisingStartPending,
+              advertisingRequested,
+              serviceReady,
+              peripheralManager.state == .poweredOn
+        else {
+            return
+        }
+
+        if peripheralManager.isAdvertising {
+            peripheralManager.stopAdvertising()
+        }
+
+        advertise()
     }
 
     public override init()
@@ -120,6 +141,13 @@ private var debugAcknowledgmentEnabled = true
     public func stopAdvertising()
     {
         advertisingRequested = false
+
+        guard !isAdvertisingStartPending else {
+            return
+        }
+
+        advertisingLocalNameAtStart = nil
+
         peripheralManager.stopAdvertising()
     }
 
@@ -160,9 +188,9 @@ private var debugAcknowledgmentEnabled = true
         guard advertisingRequested,
               serviceReady,
               peripheralManager.state == .poweredOn,
-              !peripheralManager.isAdvertising
-        else
-        {
+              !peripheralManager.isAdvertising,
+              !isAdvertisingStartPending
+        else {
             return
         }
 
@@ -176,6 +204,9 @@ private var debugAcknowledgmentEnabled = true
            !localName.isEmpty {
             advertisementData[CBAdvertisementDataLocalNameKey] = localName
         }
+
+        advertisingLocalNameAtStart = advertisementLocalName
+        isAdvertisingStartPending = true
 
         peripheralManager.startAdvertising(advertisementData)
     }
@@ -1032,6 +1063,9 @@ extension BLEPeripheral: @preconcurrency CBPeripheralManagerDelegate
             serviceReady = false
             serviceRegistrationInProgress = false
             messageCharacteristic = nil
+            isAdvertisingStartPending = false
+            advertisingLocalNameAtStart = nil
+
             // Bluetoothが使用できない場合は通信状態を破棄
             cleanupAllConnections()
         }
@@ -1310,14 +1344,36 @@ extension BLEPeripheral: @preconcurrency CBPeripheralManagerDelegate
         }
     }
 
-    public func peripheralManagerDidStartAdvertising(_ peripheral: CBPeripheralManager,
-                                                     error: Error?)
-    {
-        if let error
-        {
+    public func peripheralManagerDidStartAdvertising(
+        _ peripheral: CBPeripheralManager,
+        error: Error?
+    ) {
+        isAdvertisingStartPending = false
+
+        guard advertisingRequested,
+              serviceReady,
+              peripheral.state == .poweredOn
+        else {
+            if peripheral.state == .poweredOn,
+               peripheral.isAdvertising {
+                peripheral.stopAdvertising()
+            }
+            return
+        }
+
+        if let error {
             delegate?.peripheralDidFailToAdvertise(
                 error: error
             )
+            return
+        }
+
+        if advertisingLocalNameAtStart != advertisementLocalName {
+
+            peripheral.stopAdvertising()
+
+            advertise()
+
             return
         }
 
