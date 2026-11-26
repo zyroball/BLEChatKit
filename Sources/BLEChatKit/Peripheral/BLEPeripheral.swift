@@ -87,23 +87,37 @@ private var debugAcknowledgmentEnabled = true
     
     public func setAdvertisementLocalName(_ name: String?) {
 
+        print("[BLEPeripheral Profile] Old name:", advertisementLocalName ?? "nil")
+        print("[BLEPeripheral Profile] New name:", name ?? "nil")
+
         guard advertisementLocalName != name else {
+            print("[BLEPeripheral Profile] Same name - skipped")
             return
         }
 
         advertisementLocalName = name
+
+        print("[BLEPeripheral Profile] Start pending:", isAdvertisingStartPending)
+        print("[BLEPeripheral Profile] Advertising requested:", advertisingRequested)
+        print("[BLEPeripheral Profile] Service ready:", serviceReady)
+        print("[BLEPeripheral Profile] Powered on:", peripheralManager.state == .poweredOn)
+        print("[BLEPeripheral Profile] Is advertising:", peripheralManager.isAdvertising)
 
         guard !isAdvertisingStartPending,
               advertisingRequested,
               serviceReady,
               peripheralManager.state == .poweredOn
         else {
+            print("[BLEPeripheral Profile] Guard blocked")
             return
         }
 
         if peripheralManager.isAdvertising {
+            print("[BLEPeripheral Profile] Stopping advertising")
             peripheralManager.stopAdvertising()
         }
+
+        print("[BLEPeripheral Profile] Restarting advertising")
 
         advertise()
     }
