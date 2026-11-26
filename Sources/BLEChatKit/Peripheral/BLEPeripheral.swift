@@ -1405,11 +1405,8 @@ extension BLEPeripheral: @preconcurrency CBPeripheralManagerDelegate
         }
 
         if advertisingLocalNameAtStart != advertisementLocalName {
-
             peripheral.stopAdvertising()
-
-            advertise()
-
+            advertise(restartRetries: 10)
             return
         }
 
