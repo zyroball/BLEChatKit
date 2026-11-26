@@ -119,7 +119,7 @@ private var debugAcknowledgmentEnabled = true
 
         print("[BLEPeripheral Profile] Restarting advertising")
 
-        advertise()
+        advertise(restartRetries: 10)
     }
 
     public override init()
@@ -197,21 +197,31 @@ private var debugAcknowledgmentEnabled = true
         peripheralManager.add(service)
     }
 
-    private func advertise()
+    private func advertise(restartRetries: Int = 0)
     {
-        print("[BLEPeripheral Advertise] Requested:", advertisingRequested)
-        print("[BLEPeripheral Advertise] Service ready:", serviceReady)
-        print("[BLEPeripheral Advertise] Powered on:", peripheralManager.state == .poweredOn)
-        print("[BLEPeripheral Advertise] Is advertising:", peripheralManager.isAdvertising)
-        print("[BLEPeripheral Advertise] Start pending:", isAdvertisingStartPending)
-
         guard advertisingRequested,
               serviceReady,
               peripheralManager.state == .poweredOn,
-              !peripheralManager.isAdvertising,
               !isAdvertisingStartPending
         else {
-            print("[BLEPeripheral Advertise] Guard blocked")
+            return
+        }
+
+        if peripheralManager.isAdvertising {
+
+            guard restartRetries > 0 else {
+                return
+            }
+
+            DispatchQueue.main.asyncAfter(
+                deadline: .now() + 0.1
+            ) { [weak self] in
+
+                self?.advertise(
+                    restartRetries: restartRetries - 1
+                )
+            }
+
             return
         }
 
@@ -223,7 +233,10 @@ private var debugAcknowledgmentEnabled = true
 
         if let localName = advertisementLocalName,
            !localName.isEmpty {
-            advertisementData[CBAdvertisementDataLocalNameKey] = localName
+
+            advertisementData[
+                CBAdvertisementDataLocalNameKey
+            ] = localName
         }
 
         advertisingLocalNameAtStart = advertisementLocalName
