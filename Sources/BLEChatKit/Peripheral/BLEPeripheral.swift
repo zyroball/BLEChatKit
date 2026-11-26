@@ -87,37 +87,23 @@ private var debugAcknowledgmentEnabled = true
     
     public func setAdvertisementLocalName(_ name: String?) {
 
-        print("[BLEPeripheral Profile] Old name:", advertisementLocalName ?? "nil")
-        print("[BLEPeripheral Profile] New name:", name ?? "nil")
-
         guard advertisementLocalName != name else {
-            print("[BLEPeripheral Profile] Same name - skipped")
             return
         }
 
         advertisementLocalName = name
-
-        print("[BLEPeripheral Profile] Start pending:", isAdvertisingStartPending)
-        print("[BLEPeripheral Profile] Advertising requested:", advertisingRequested)
-        print("[BLEPeripheral Profile] Service ready:", serviceReady)
-        print("[BLEPeripheral Profile] Powered on:", peripheralManager.state == .poweredOn)
-        print("[BLEPeripheral Profile] Is advertising:", peripheralManager.isAdvertising)
 
         guard !isAdvertisingStartPending,
               advertisingRequested,
               serviceReady,
               peripheralManager.state == .poweredOn
         else {
-            print("[BLEPeripheral Profile] Guard blocked")
             return
         }
 
         if peripheralManager.isAdvertising {
-            print("[BLEPeripheral Profile] Stopping advertising")
             peripheralManager.stopAdvertising()
         }
-
-        print("[BLEPeripheral Profile] Restarting advertising")
 
         advertise(restartRetries: 10)
     }
@@ -197,7 +183,7 @@ private var debugAcknowledgmentEnabled = true
         peripheralManager.add(service)
     }
 
-    private func advertise(restartRetries: Int = 0)
+    private func advertise(restartRetries: Int? = nil)
     {
         guard advertisingRequested,
               serviceReady,
@@ -209,7 +195,16 @@ private var debugAcknowledgmentEnabled = true
 
         if peripheralManager.isAdvertising {
 
-            guard restartRetries > 0 else {
+            guard let remaining = restartRetries else {
+                return
+            }
+
+            guard remaining > 0 else {
+
+                if advertisingLocalNameAtStart != advertisementLocalName {
+                    print("[BLEPeripheral] Advertising restart timed out")
+                }
+
                 return
             }
 
@@ -218,7 +213,7 @@ private var debugAcknowledgmentEnabled = true
             ) { [weak self] in
 
                 self?.advertise(
-                    restartRetries: restartRetries - 1
+                    restartRetries: remaining - 1
                 )
             }
 
@@ -242,11 +237,8 @@ private var debugAcknowledgmentEnabled = true
         advertisingLocalNameAtStart = advertisementLocalName
         isAdvertisingStartPending = true
 
-        print("[BLEPeripheral Advertise] Calling startAdvertising")
-
         peripheralManager.startAdvertising(advertisementData)
     }
-    
     
     @discardableResult
     public func send(_ message: String,
